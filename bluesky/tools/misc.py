@@ -323,10 +323,12 @@ def lat2txt(lat):
     d,m,s = float2degminsec(abs(lat))
     return "NS"[int(lat<0)] + "%02d'%02d'"%(int(d),int(m))+str(s)+'"'
 
+
 def lon2txt(lon):
     ''' Convert longitude into string (E/Wdegrees'minutes'seconds). '''
     d,m,s = float2degminsec(abs(lon))
     return "EW"[int(lon<0)] + "%03d'%02d'"%(int(d),int(m))+str(s)+'"'
+
 
 def latlon2txt(lat,lon):
     ''' Convert latitude and longitude in latlon string. '''

@@ -102,7 +102,7 @@ class Navdatabase:
         elif name.isdigit():
             return False, "Name needs to start with an alphabetical character"
 
-        # DEL command: give info on waypoint (shudl work wit or without lat,lon, may be clicked by accident
+        # DEL command: give info on waypoint (shuld work with or without lat,lon, may be clicked by accident)
         elif (not wptype==None and (wptype.upper()=="DEL" or wptype.upper() =="DELETE")) or \
             (type(lon)==str and (lon.upper()=="DEL" or lon.upper=="DELETE")):
             return self.delwpt(name)

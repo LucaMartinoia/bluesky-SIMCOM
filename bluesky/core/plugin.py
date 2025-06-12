@@ -11,7 +11,6 @@ from bluesky import stack
 # Register settings defaults
 settings.set_variable_defaults(plugin_path='plugins', enabled_plugins=['datafeed'])
 
-
 class Plugin:
     ''' BlueSky plugin class.
         This class is used internally to store information about bluesky
@@ -89,9 +88,12 @@ class Plugin:
         ''' Create plugin wrapper objects based on source code of potential plug-in files. '''
         for path in (Path(p) for p in plugins.__spec__.submodule_search_locations):
             for fname in path.glob('**/*.py'):
+                if '.ipynb_checkpoints' in fname.parts:
+                    continue
                 submod = fname.relative_to(path).parent.as_posix().replace('/', '.')
                 fullname = f'bluesky.plugins.{fname.stem}' if submod == '.' else \
                            f'bluesky.plugins.{submod}.{fname.stem}'
+
                 with open(fname, 'rb') as f:
                     source = f.read()
                     try:

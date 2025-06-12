@@ -41,7 +41,7 @@ def loadnavdata_txt():
 
             fields = line.split()
 
-            # Valid line starst with integers
+            # Valid line starts with integers
             if not fields[0].isdigit():
                 continue # Next line
 
