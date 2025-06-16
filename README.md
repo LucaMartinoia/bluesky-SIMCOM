@@ -1,54 +1,37 @@
-# BlueSky - The Open Air Traffic Simulator
+# SIMCOM - Multi-agent ATM simulation for attack evaluation on ASD-B communications
 
-[![Open in Visual Studio Code](https://img.shields.io/static/v1?logo=visualstudiocode&label=&message=Open%20in%20Visual%20Studio%20Code&labelColor=2c2c32&color=007acc&logoColor=007acc)](https://open.vscode.dev/TUDelft-CNS-ATM/bluesky)
-[![GitHub release](https://img.shields.io/github/release/TUDelft-CNS-ATM/bluesky.svg)](https://GitHub.com/TUDelft-CNS-ATM/bluesky/releases/)
-![GitHub all releases](https://img.shields.io/github/downloads/TUDelft-CNS-ATM/bluesky/total?style=social)
-[![Discord](https://img.shields.io/discord/1359446056877690970?style=flat&logo=discord&logoColor=green&logoSize=auto&label=BlueSky%20discussion)](https://discord.gg/wkBKgXCHYN)
+SIMCOM is one of the research solutions developed as part of the [ATM-EXCITE](https://atm-excite.eu/) project, funded by the [SESAR JU | Exploratory Research](https://www.sesarju.eu/exploratoryresearch) programme and led by [STAM S.r.l.](https://www.stamtech.com/)
+
+The main objective of SIMCOM is to provide a flexible and extensible simulation framework designed to support in-depth research on the impact of cyber-attacks targeting the Automatic Dependent Surveillance–Broadcast (ADS-B) system, a cornerstone of modern air traffic surveillance. In particular, SIMCOM focuses on simulating vulnerabilities within ADS-B and their consequences on air traffic flow and control systems.
+
+Beyond analyzing attack scenarios, SIMCOM also aims to serve as a testing ground for cyber-defense strategies. It enables users to implement, verify, and evaluate the effectiveness of various mitigation techniques in a controlled environment. SIMCOM is built upon [BlueSky](https://github.com/TUDelft-CNS-ATM/bluesky), an open-source research-grade air traffic management (ATM) simulator. By leveraging BlueSky's modular architecture, SIMCOM significantly extends its capabilities with additional features tailored to cyber-security experimentation.
+
+## Background
+
+[ADS-B](https://skybrary.aero/articles/automatic-dependent-surveillance-broadcast-ads-b) is a surveillance technology increasingly adopted worldwide in both civil and military aviation. It is a cornerstone of next-generation air traffic management due to its ability to provide real-time, high-accuracy aircraft position data.
+
+The system operates by using GNSS (Global Navigation Satellite System) to determine the aircraft’s position, which is then automatically broadcast—along with other flight information such as speed, heading, and identification—over radio frequencies. This broadcast happens continuously and over a wide geographical area, enabling both ground-based receivers and nearby aircraft to obtain situational awareness.
+
+The ADS-B system consists of two distinct subsystems:
+- ADS-B Out: Transmits the aircraft’s position and other data to external receivers.
+- ADS-B In: Receives and decodes messages broadcast by other aircraft and ground stations.
+
+While ADS-B offers significant improvements in terms of cost, coverage, and accuracy over traditional primary and secondary radar systems, it suffers from a critical shortcoming: it was not designed with security in mind. The standard ADS-B protocol used in civil aviation broadcasts unencrypted data in plain text, making it susceptible to eavesdropping, spoofing, message injection, and denial-of-service attacks ([Schäfer et al., 2013](https://doi.org/10.1007/978-3-642-38980-1_16)). These vulnerabilities raise concerns about the system’s trustworthiness and hinder its full adoption as a radar replacement.
+
+## The ATM-EXCITE Project
+
+Although numerous cyber-security solutions for ADS-B have been proposed in the scientific literature, very few have transitioned from academic research into real-world applications. The ATM-EXCITE project aims to bridge this gap by advancing ADS-B security toward operational readiness.
+
+One of the project’s core goals is to strengthen the ADS-B system with encryption and authentication mechanisms, improving both the safety and the resilience of air traffic surveillance systems. These enhancements are expected to benefit not only civil aviation but also civil-military cooperation, where secure and reliable airspace data sharing is paramount.
+
+Within this context, SIMCOM plays a key role by offering a simulation-based platform where cyber-security strategies can be developed, validated, and stress-tested. The simulator allows stakeholders—including researchers, aviation authorities, and system integrators—to:
+- Simulate various cyber-attack scenarios targeting ADS-B.
+- Observe the operational impact on air traffic management.
+- Experiment with and evaluate the effectiveness of defense mechanisms in realistic conditions.
+
+SIMCOM thus represents a critical step toward building more secure, reliable, and resilient air traffic infrastructures.
 
 
-[![PyPI version shields.io](https://img.shields.io/pypi/v/bluesky-simulator.svg)](https://pypi.python.org/pypi/bluesky-simulator/)
-![PyPI - Downloads](https://img.shields.io/pypi/dm/bluesky-simulator?style=plastic)
-[![PyPI license](https://img.shields.io/pypi/l/bluesky-simulator?style=plastic)](https://pypi.python.org/pypi/bluesky-simulator/)
-[![PyPI pyversions](https://img.shields.io/pypi/pyversions/bluesky-simulator?style=plastic)](https://pypi.python.org/pypi/bluesky-simulator/)
+## Installation
 
-BlueSky is meant as a tool to perform research on Air Traffic Management and Air Traffic Flows, and is distributed under the MIT license.
-
-The goal of BlueSky is to provide everybody who wants to visualize, analyze or simulate air
-traffic with a tool to do so without any restrictions, licenses or limitations. It can be copied,
-modified, cited, etc. without any limitations.
-
-**Citation info:** J. M. Hoekstra and J. Ellerbroek, "[BlueSky ATC Simulator Project: an Open Data and Open Source Approach](https://www.researchgate.net/publication/304490055_BlueSky_ATC_Simulator_Project_an_Open_Data_and_Open_Source_Approach)", Proceedings of the seventh International Conference for Research on Air Transport (ICRAT), 2016.
-
-## BlueSky Releases
-BlueSky is also available as a pip package, for which periodically version releases are made. You can find the latest release here:
-https://github.com/TUDelft-CNS-ATM/bluesky/releases
-The BlueSky pip package is installed with the following command:
-
-    pip install bluesky-simulator[full]
-
-Using ZSH? Add quotes around the package name: `"bluesky-simulator[full]"`. For more installation instructions go to the Wiki.
-
-## BlueSky Wiki
-Installation and user guides are accessible at:
-https://github.com/TUDelft-CNS-ATM/bluesky/wiki
-
-## Some features of BlueSky:
-- Written in the freely available, ultra-simple-hence-easy-to-learn, multi-platform language
-Python 3 (using numpy and either pygame or Qt+OpenGL for visualisation) with source
-- Extensible by means of self-contained [plugins](https://github.com/TUDelft-CNS-ATM/bluesky/wiki/plugin)
-- Contains open source data on navaids, performance data of aircraft and geography
-- Global coverage navaid and airport data
-- Contains simulations of aircraft performance, flight management system (LNAV, VNAV under construction),
-autopilot, conflict detection and resolution and airborne separation assurance systems
-- Compatible with BADA 3.x data
-- Compatible wth NLR Traffic Manager TMX as used by NLR and NASA LaRC
-- Traffic is controlled via user inputs in a console window or by playing scenario files (.SCN)
-containing the same commands with a time stamp before the command ("HH:MM:SS.hh>")
-- Mouse clicks in traffic window are use in console for lat/lon/heading and position inputs
-
-## Questions or suggestions?
-Visit us on [Discord](https://discord.gg/wkBKgXCHYN), open a topic on the GitHub discussion board, or open an issue.
-
-## Contributions
-BlueSky can be considered 'perpetual beta'. We would like to encourage anyone with a strong interest in
-ATM and/or Python to join us. Please feel free to comment, criticise, and contribute to this project. Please send suggestions, proposed changes or contributions through GitHub pull requests, preferably after debugging it and optimising it for run-time performance.
+For installation instructions, refer to the original [BlueSky repository](https://github.com/TUDelft-CNS-ATM/bluesky).
