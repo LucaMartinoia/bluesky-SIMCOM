@@ -42,12 +42,12 @@
 00:00:02.00>CRE PY058    B757  52.501717    2.829971 152.3   30009 303.8
 00:00:02.00>PY058 DEST LFSD      
 
+00:00:02.30>HOLD
+
 # Switch on resolution module to have separation assurance (can also be used to simulate ATCO actions)
 
 00:00:02.50>RESO MVP
 00:00:02.50>Echo Switching on resolutions with MVP algorithm
-
-00:00:03>HOLD
 
 # Basic AP modes : HDG SEL, SPD SEL, ALT SEL
 00:00:10.00>KL204 HDG 235

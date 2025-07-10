@@ -1,5 +1,7 @@
 """ This plugin implements the ADS-B protocol. """
 
+""" TO DO: update function, POS function, labels! """
+
 from random import randint
 import numpy as np
 # Import the global bluesky objects. Uncomment the ones you need
@@ -15,14 +17,14 @@ from . import adsbencoder as encoder
 capability = 5
 # Type Codes for ADS-B messages.
 # identification: 4. Identification is 1-4. 4 is associated with standard aircraft, with emitter category identifies the wake vertex category.
-# position: 20. Airborne position is 9-18 (barometric altitude) or 20-22 (GNSS altitude). 20 is associated with high accuracy.
-type_codes = dict(identification=4, position=9)
+# position: 9. Airborne position is 9-18 (barometric altitude) or 20-22 (GNSS altitude). 9 is associated with high accuracy.
+type_codes = dict(identification=4, position=9, velocity=19)
 # Emitter category: combined with type code, it tells the wake vertex category. TC=4, EC=3 means medium aircraft. ############################################# TO DO, CHECK IF THE DATA EXISTS IN OPENAP OR LEGACY.
 emitter_category = 3
 time_bit = 0 # Time bit used for position messages, keep 0 for all messages for the moment.
 surveillance_status = 0 # Indicates ALERT status. 0 indicates no alert.
-# The antenna flag indicates whether the system has a single antenna or two antennas (1: single antenna).
-antenna_flag = 1 # In Version 2, this is the NICb bit.
+# The antenna flag indicates whether the system has a single antenna or two antennas (1: single antenna). In Version 2, this is the NICb bit.
+antenna_flag = 1
 
 # These squawk values are reserved for danger situations (hijack, generic problems).
 DANGER_SQUAWKS = {'7500', '7600', '7700'}
@@ -76,6 +78,7 @@ class ADSBprotocol(core.Entity):
             self.icao = np.array([], dtype='U6')
             self.squawk = np.array([], dtype='U4')
             self.danger = np.array([], dtype=bool)
+            # self.baroalt = traf.alt + random.normal(0, sqrt(1000)) # for velocity messages we need barometric and GNSS altitude. Assume the one already implemented is GNSS (or baro, think about it) and implement the other with some gaussian error around the main value.
 
     def create(self, n=1):
         ''' This function gets called automatically when new aircraft are created.'''
@@ -157,18 +160,20 @@ class ADSBprotocol(core.Entity):
         for acid, squawk in zip(dangerous_ids, dangerous_squawks):
             stack.stack(f'ECHO --- Aircraft {acid} is in danger (squawk {squawk}) ---')
 
-    @stack.command
+    
+    @stack.command(name='ALTADSB', aliases=('ALTITUDEADSB', ), brief='ALTADSB acid, [alt]')
     def altADSB(self, acid: 'acid', alt: 'alt' = -1):
-        ''' Set the altitude that is broacast to the ADS-B of a given aircraft to "alt".'''
+        ''' Set the altitude that is broacast to the ADS-B of a given aircraft to "alt". If "alt" is negative or None, it returns the ADS-B altitude of the aircraft. '''
         if alt < 0:
             return True, f'Aircraft {traf.id[acid]} ADS-B altitude is {self.altADSB[acid]/ft:0f} ft.'
             
         self.altADSB[acid] = alt
         return True, f'ADS-B altitude for {traf.id[acid]} set to {alt/ft:.0f} ft.'
 
-    @stack.command
+    
+    @stack.command(name='SQUAWK', brief='SQUAWK acid, [squawk]')
     def squawk(self, acid: 'acid', squawk: str = ''):
-        ''' Set the squawk code of a given aircraft.'''
+        ''' Set the squawk code of a given aircraft. If the code is not given, it returns the squawk code of the aircraft. '''
         if squawk == '':
             return True, f'Aircraft {traf.id[acid]} squawk code is {self.squawk[acid]}.'
     
