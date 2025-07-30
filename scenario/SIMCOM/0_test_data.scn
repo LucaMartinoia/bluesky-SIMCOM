@@ -1,8 +1,8 @@
 # Example scenario
 
-00:00:00.00>PLUGIN LOAD ADSBPROTOCOL
+00:00:00.50>PLUGIN LOAD ADSBPROTOCOL
 
-00:00:00.00>CRE KL204,B744,52,4,90,FL250,350
+00:00:00.50>CRE KL204,B744,52,4,90,FL250,350
 
 # Create a B747-400 with call sign KL204
 # lat,lon = 52,4   (positions can also be clicked with mouse)
@@ -11,27 +11,27 @@
 # speed = 350 (kts, CAS), Mach can also be use deg.g 0.84 or M.84 or M84
 
 # Define a route  
-00:00:00.00>KL204 ORIG eham
-00:00:00.00>KL204 DEST ehgg
+00:00:00.50>KL204 ORIG eham
+00:00:00.50>KL204 DEST ehgg
 
 # Edit flight plan: call sign ADDWPT wptname, [alt], [spd]
 # Waypoint are added at the end of the route before destination
 
-00:00:00.00>KL204 addwpt SPL,FL250
-00:00:00.00>KL204 addwpt RTM,,350
+00:00:00.50>KL204 addwpt SPL,FL250
+00:00:00.50>KL204 addwpt RTM,,350
 
 # Insert a waypoint
-00:00:00.00>KL204 after spl addwpt SSB
+00:00:00.50>KL204 after spl addwpt SSB
 
 # Turn on vertical and lateral autopilot VNAV/LNAV
-00:00:00.00>KL204 LNAV ON;KL204 VNAV ON
+00:00:00.50>KL204 LNAV ON;KL204 VNAV ON
 
 # Double click shows rotue via POS command
 # POS command can also be used for info on navaids and airports
-00:00:00.00>POS KL204
+00:00:00.50>POS KL204
 
 # List route shows route
-00:00:00.00>LISTRTE KL204
+00:00:00.50>LISTRTE KL204
 
 # When only a destination is entered it is still a route, and LNAV/VNAV is activated
 

@@ -11,14 +11,13 @@ The main objective of SIMCOM is to provide a flexible and extensible simulation 
 </p>
 
 <p align="justify">
-Beyond analyzing attack scenarios, SIMCOM also aims to serve as a testing ground for cyber-defense strategies. It enables users to implement, verify, and evaluate the effectiveness of various mitigation techniques in a controlled environment. SIMCOM is built upon [BlueSky](https://github.com/TUDelft-CNS-ATM/bluesky), an open-source research-grade air traffic management (ATM) simulator. By leveraging BlueSky's modular architecture, SIMCOM significantly extends its capabilities with additional features tailored to cyber-security experimentation.
+Beyond analyzing attack scenarios, SIMCOM also aims to serve as a testing ground for cyber-defense strategies. It enables users to implement, verify, and evaluate the effectiveness of various mitigation techniques in a controlled environment. SIMCOM is built upon <a href="https://github.com/TUDelft-CNS-ATM/bluesky">BlueSky</a>, an open-source research-grade air traffic management (ATM) simulator. By leveraging BlueSky's modular architecture, SIMCOM significantly extends its capabilities with additional features tailored to cyber-security experimentation.
 </p>
 
 ## Background
 
 <p align="justify">
-
-[ADS-B](https://skybrary.aero/articles/automatic-dependent-surveillance-broadcast-ads-b) is a surveillance technology increasingly adopted worldwide in both civil and military aviation. It is a cornerstone of next-generation air traffic management due to its ability to provide real-time, high-accuracy aircraft position data.
+<a href="https://skybrary.aero/articles/automatic-dependent-surveillance-broadcast-ads-b">ADS-B</a> is a surveillance technology increasingly adopted worldwide in both civil and military aviation. It is a cornerstone of next-generation air traffic management due to its ability to provide real-time, high-accuracy aircraft position data.
 </p>
 
 <p align="justify">
@@ -30,7 +29,7 @@ The ADS-B system consists of two distinct subsystems:
 - ADS-B In: Receives and decodes messages broadcast by other aircraft and ground stations.
 
 <p align="justify">
-While ADS-B offers significant improvements in terms of cost, coverage, and accuracy over traditional primary and secondary radar systems, it suffers from a critical shortcoming: it was not designed with security in mind. The standard ADS-B protocol used in civil aviation broadcasts unencrypted data in plain text, making it susceptible to eavesdropping, spoofing, message injection, and denial-of-service attacks ([Schäfer et al., 2013](https://doi.org/10.1007/978-3-642-38980-1_16)). These vulnerabilities raise concerns about the system’s trustworthiness and hinder its full adoption as a radar replacement.
+While ADS-B offers significant improvements in terms of cost, coverage, and accuracy over traditional primary and secondary radar systems, it suffers from a critical shortcoming: it was not designed with security in mind. The standard ADS-B protocol used in civil aviation broadcasts unencrypted data in plain text, making it susceptible to eavesdropping, spoofing, message injection, and denial-of-service attacks (<a href="https://doi.org/10.1007/978-3-642-38980-1_16">Schäfer et al., 2013</a>). These vulnerabilities raise concerns about the system’s trustworthiness and hinder its full adoption as a radar replacement.
 </p>
 
 ## The ATM-EXCITE Project

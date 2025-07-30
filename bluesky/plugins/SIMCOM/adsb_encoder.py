@@ -9,7 +9,7 @@ import sys
 from pathlib import Path
 
 # Add the BlueSky root directory to sys.path
-sys.path.append(str(Path(__file__).resolve().parents[3]))
+#sys.path.append(str(Path(__file__).resolve().parents[3]))
 
 from bluesky.tools.aero import kts, ft, a0
 
@@ -401,7 +401,7 @@ def velocity(ca: int, icao: str, IC_flag: int, NACv: int, gs_north: float, gs_ea
 # --------------------------------------------------------------------
 # --------------------------------------------------------------------
 
-def test_identification():
+def _test_identification():
     icao = f'{randint(0, 0xFFFFFF):06X}'
     callsign = f'{randint(0, 0o7777):04o}'
     capability = 5
@@ -422,7 +422,7 @@ def test_identification():
           f"Callsign match:\t\t{callsign == pms.adsb.callsign(msg).strip("_")}\n")
 
 
-def test_position():
+def _test_position():
     icao = f'{randint(0, 0xFFFFFF):06X}'
     capability = 5
     TC = 9
@@ -458,7 +458,7 @@ def test_position():
           f"Altitude match:\t\t{abs(alt_S - alt / ft) < 25}\n")
 
 
-def test_velocity():
+def _test_velocity():
     icao = f'{randint(0, 0xFFFFFF):06X}'
     capability = 5
     IC_flag = 0 # intent change flag
@@ -512,6 +512,6 @@ def test_velocity():
 
 if __name__=='__main__':
 
-    test_position()
-    test_identification()
-    test_velocity()
+    _test_position()
+    _test_identification()
+    _test_velocity()
