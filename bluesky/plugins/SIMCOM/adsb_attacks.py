@@ -3,100 +3,59 @@ import numpy as np
 # Import the global bluesky objects. Uncomment the ones you need
 from bluesky import core, stack, traf  #, settings, navdb, sim, scr, tools
 from bluesky.tools.aero import ft
-from bluesky.network.publisher import state_publisher
-from bluesky.network.subscriber import subscriber
-from . import adsb_encoder as encoder
 
-# These squawk values are reserved for danger situations (hijack, generic problems).
-DANGER_SQUAWKS = {'7500', '7600', '7700'}
+attack_types = ['NONE', 'JAMMING']
 
-# Update rate of aircraft update messages [Hz]
-ACUPDATE_RATE = 5
-
-def init_plugin():
-    ''' Plugin initialisation function. '''
-
-    print("\n--- Loading SIMCOM plugin: ADS-B attacks ---\n")
-
-    # Instantiate our example entity
-    adsbattacks = ADSBattacks()
+def normal(traf_data, adsb_data):
+    '''Nomral behaviour, no attacks.'''
+    noise = np.random.uniform(-150, 150, size=traf_data.alt.shape)
+    GNSSalt = traf_data.alt + noise
     
-    # Configuration parameters
-    config = {
-        # The name of your plugin
-        'plugin_name': 'ADSBATTACKS',
-        # The type of this plugin.
-        'plugin_type': 'sim',
-        # Reset contest
-        'reset': adsbattacks.reset
-        }
-    # init_plugin() should always return a configuration dict.
-    return config
+    result = {
+        'GNSSalt': np.maximum(GNSSalt, 0),  # GNSS altitude
+        'BaroAlt': traf_data.alt,           # Barometric altitude (same as actual)
+        'lat':     traf_data.lat,
+        'lon':     traf_data.lon,
+        'tas':     traf_data.tas,
+        'gsnorth': traf_data.gsnorth,
+        'gseast':  traf_data.gseast,
+        'vs':      traf_data.vs,
+        'hdg':     traf_data.hdg,
+        'trk':     traf_data.trk,
+    }
+    return result
 
-
-def is_valid_squawk(squawk):
-    if not isinstance(squawk, str):
-        return False
-    if len(squawk) != 4:
-        return False
-    try:
-        value = int(squawk, 8)  # Parse as octal
-        return 0 <= value <= 0o7777
-    except ValueError:
-        return False
-
-
-### Need some way to still identify AC uniquely:
-### the ACID still remains the main identifier.
-class ADSBattacks(core.Entity):
+def jamming(traf_data, adsb_data):
+    '''Simulate jamming by freezing ADS-B outputs to last known values.'''
     
-    def __init__(self):
-        super().__init__()
-        # All classes deriving from Entity can register lists and numpy arrays
-        # that hold per-aircraft data. This way, their size is automatically
-        # updated when aircraft are created or deleted in the simulation.
-        with self.settrafarrays():
-            self.attack = []
+    result = {
+        'GNSSalt': adsb_data.GNSSalt,
+        'BaroAlt': adsb_data.BaroAlt,
+        'lat':     adsb_data.lat,
+        'lon':     adsb_data.lon,
+        'tas':     adsb_data.tas,
+        'gsnorth': adsb_data.gsnorth,
+        'gseast':  adsb_data.gseast,
+        'vs':      adsb_data.vs,
+        'hdg':     adsb_data.hdg,
+        'trk':     adsb_data.trk,
+    }
 
-            
-    def create(self, n=1):
-        ''' This function gets called automatically when new aircraft are created.'''
-        # Don't forget to call the base class create when you reimplement this function!
-        super().create(n)
-
-        # Inizialize the ICAO addresses
-        self.attack[-n:] = ''
-
-    
-    def reset(self):
-        ''' Clear all traffic data upon simulation reset. '''
-        # Some child reset functions depend on a correct value of self.ntraf
-        self.ntraf = 0
-        # This ensures that the traffic arrays (which size is dynamic)
-        # are all reset as well, so all lat,lon,sdp etc but also objects adsb
-        super().reset()
-
-        self.attack = []
+    return result
 
 
-    def id2idx(self, acid):
-        """Find index of aircraft id"""
-        if not isinstance(acid, str):
-            # id2idx is called for multiple id's
-            # Fast way of finding indices of all ACID's in a given list
-            tmp = dict((v, i) for i, v in enumerate(traf.id))
-            # return [tmp.get(acidi, -1) for acidi in acid]
-        else:
-             # Catch last created id (* or # symbol)
-            if acid in ('#', '*'):
-                return traf.ntraf - 1
+@stack.command(name='ATTACK', brief='ATTACK acid, attack_type (NONE, JAMMING)')
+def attack(acid: 'acid', attack: str = ''):
+    '''Set the attack for a given aircraft.'''
+    if attack.upper() in ['OFF', 'CLEAR']:
+        attack = 'NONE'
 
-            try:
-                return traf.id.index(acid.upper())
-            except:
-                return -1
-            
-    @subscriber(topic='ADSBDATA', actonly=False, from_group='*', to_group='*')
-    def update_adsb_data(self, data):
-        """ NO IDEA WHY THIS DOES NOT WORK """
-        print("subscriber")
+    if attack == '':
+        return True, f'Aircraft {traf.id[acid]} is currently under {traf.ADSBattack[acid]} attack.'
+
+    attack = attack.upper()
+    if attack not in attack_types:
+        return False, f'Unknown attack type "{attack}". Supported types: {", ".join(attack_types)}.'
+
+    traf.ADSBattack[acid] = attack
+    return True, f'{traf.id[acid]} is under {attack} attack.'

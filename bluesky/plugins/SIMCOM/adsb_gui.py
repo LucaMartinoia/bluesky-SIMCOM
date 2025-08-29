@@ -33,6 +33,7 @@ def init_plugin():
 MAX_NAIRCRAFT = 10000
 red_clr = np.array((255, 0, 0, 255), dtype=np.uint8)
 green_clr = np.array((0, 255, 0, 255), dtype=np.uint8)
+flash_mult = 4  # The multiplier for the danger flashes.
 
 ### Entities in BlueSky are objects that are created only once (called singleton)
 ### which implement some traffic or other simulation functionality.
@@ -118,7 +119,7 @@ class ADSBRadar(RenderObject, layer=101):
                 new = old[:len(new), :]
             return new
     
-        if next(self.counter) % 4 == 0:
+        if next(self.counter) % flash_mult == 0:
             self.danger = np.array(data.danger, dtype=bool)
             self.color_backup = color_array_update()
     
@@ -172,12 +173,14 @@ class ADSBRadar(RenderObject, layer=101):
         self.lbl.update(np.array(rawlabel.encode('utf8'), dtype=np.bytes_))
 
 
-    @stack.command(name='SHOWDANGER', aliases=('SHOWDANGERFFLASH',), brief='SHOWDANGER [flag]')
-    def showtraf(self, flag: bool=None):
+
+    #### THESE FUNCTIONS AREN'T WORKING PROPERLY ####
+    @stack.command(name='SHOWDANGER', aliases=('SHOWDANGERFLASH',), brief='SHOWDANGER [flag]')
+    def showdanger(self, flag: bool=None):
         ''' Toggle drawing of danger flashes. '''
         self.show_danger = not self.show_danger if flag is None else flag
 
     @stack.command(name='SHOWDADSB', aliases=('SHOWADSBTRAF',), brief='SHOWADSB [flag]')
-    def showtraf(self, flag: bool=None):
-        ''' Toggle drawing of danger flashes. '''
+    def showadsbtraf(self, flag: bool=None):
+        ''' Toggle drawing of ADS-B traffic. '''
         self.show_adsb = not self.show_adsb if flag is None else flag
