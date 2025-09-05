@@ -4,10 +4,10 @@ import numpy as np
 from bluesky import core, stack, traf  #, settings, navdb, sim, scr, tools
 from bluesky.tools.aero import ft
 
-attack_types = ['NONE', 'JAMMING']
+attack_types = {}
 
 def normal(traf_data, adsb_data):
-    '''Nomral behaviour, no attacks.'''
+    ''' Normal behaviour, no attacks. '''
     noise = np.random.uniform(-150, 150, size=traf_data.alt.shape)
     GNSSalt = traf_data.alt + noise
     
@@ -26,7 +26,7 @@ def normal(traf_data, adsb_data):
     return result
 
 def jamming(traf_data, adsb_data):
-    '''Simulate jamming by freezing ADS-B outputs to last known values.'''
+    ''' Simulate jamming by freezing ADS-B outputs to last known values. '''
     
     result = {
         'GNSSalt': adsb_data.GNSSalt,
@@ -43,9 +43,18 @@ def jamming(traf_data, adsb_data):
 
     return result
 
+attack_types.update({
+    'NONE': normal,
+    'JAMMING': jamming
+})
+
+
+# --------------------------------------------------------------------
+#                      STACK COMMANDS
+# --------------------------------------------------------------------
 
 @stack.command(name='ATTACK', brief='ATTACK acid, attack_type (NONE, JAMMING)')
-def attack(acid: 'acid', attack: str = ''):
+def attack(acid: 'acid', attack: str=''):
     '''Set the attack for a given aircraft.'''
     if attack.upper() in ['OFF', 'CLEAR']:
         attack = 'NONE'
@@ -55,7 +64,7 @@ def attack(acid: 'acid', attack: str = ''):
 
     attack = attack.upper()
     if attack not in attack_types:
-        return False, f'Unknown attack type "{attack}". Supported types: {", ".join(attack_types)}.'
+        return False, f'Unknown attack type "{attack}". Supported types: {", ".join(attack_types.keys())}.'
 
     traf.ADSBattack[acid] = attack
     return True, f'{traf.id[acid]} is under {attack} attack.'

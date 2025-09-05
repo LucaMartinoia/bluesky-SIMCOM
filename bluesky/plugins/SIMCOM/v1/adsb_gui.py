@@ -173,14 +173,16 @@ class ADSBRadar(RenderObject, layer=101):
         self.lbl.update(np.array(rawlabel.encode('utf8'), dtype=np.bytes_))
 
 
-
-    #### THESE FUNCTIONS AREN'T WORKING PROPERLY ####
-    @stack.command(name='SHOWDANGER', aliases=('SHOWDANGERFLASH',), brief='SHOWDANGER [flag]')
-    def showdanger(self, flag: bool=None):
+    @stack.command(name='SHOWDANGER', brief='SHOWDANGER [flag]')
+    def showdanger(self, flag: str=None):
         ''' Toggle drawing of danger flashes. '''
-        self.show_danger = not self.show_danger if flag is None else flag
+        # Convert string to bool if provided, else keep None
+        bool_flag = None if flag is None else flag.lower() in ('1', 'true', 'yes', 'on')
+        self.show_danger = not self.show_danger if bool_flag is None else bool_flag
 
-    @stack.command(name='SHOWDADSB', aliases=('SHOWADSBTRAF',), brief='SHOWADSB [flag]')
-    def showadsbtraf(self, flag: bool=None):
+    @stack.command(name='SHOWADSB', aliases=('SHOWADSBTRAF',), brief='SHOWADSB [flag]')
+    def showadsbtraf(self, flag: str=None):
         ''' Toggle drawing of ADS-B traffic. '''
-        self.show_adsb = not self.show_adsb if flag is None else flag
+        # Convert string to bool if provided, else keep None
+        bool_flag = None if flag is None else flag.lower() in ('1', 'true', 'yes', 'on')
+        self.show_adsb = not self.show_adsb if bool_flag is None else bool_flag

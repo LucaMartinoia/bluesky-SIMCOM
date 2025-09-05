@@ -1,6 +1,6 @@
 """ SIMCOM plugin that implements the ADS-B protocol. """
 
-""" TO DO: POS function, labels, attacks, finish GUI with line that join true and fake AC. """
+""" TO DO: Implement data-exchange based on ADS-B protocol encoding. """
 
 from random import randint
 import numpy as np
@@ -9,11 +9,8 @@ from types import SimpleNamespace
 from bluesky import core, stack, traf  #, settings, navdb, sim, scr, tools
 from bluesky.tools.aero import ft
 from bluesky.network.publisher import state_publisher
-from . import adsb_encoder as encoder
-from . import adsb_attacks as attacks
-
-### Initialization function of your plugin. Do not change the name of this
-### function, as it is the way BlueSky recognises this file as a plugin.
+from bluesky.plugins.SIMCOM import adsb_encoder as encoder
+from .adsb_attacks import attack_types
 
 # Type Codes for ADS-B messages.
 # identification: 4. Identification is 1-4. 4 is associated with standard aircraft, with emitter category identifies the wake vertex category.
@@ -22,12 +19,6 @@ type_codes = dict(identification=4, position=9, velocity=19)
 DANGER_SQUAWKS = {'7500', '7600', '7700'}  # These squawk values are reserved for danger situations (hijack, generic problems).
 ACUPDATE_RATE = 5  # Update rate of aircraft update messages [Hz]
 
-# Map each attack type to a handler
-handlers = {
-    'NONE': attacks.normal,
-    'JAMMING': attacks.jamming,
-}
-    
 def init_plugin():
     ''' Plugin initialisation function. '''
 
@@ -144,11 +135,11 @@ class ADSBprotocol(core.Entity):
 
 
     def update(self):
-        """If nothing strange is happening, the ADS-B data are updated based on the actual
+        ''' If nothing strange is happening, the ADS-B data are updated based on the actual
         aircraft data. Otherwise, if there are cyber-attacks on the ADS-B protocol, the
-        ADS-B data are determined by the attacks."""
+        ADS-B data are determined by the attacks. '''
 
-        for attack_type, func in handlers.items():
+        for attack_type, func in attack_types.items():
             mask = traf.ADSBattack == attack_type  # Define the mask for vectorialized computations
 
             # Subset of real traffic values
@@ -206,7 +197,7 @@ class ADSBprotocol(core.Entity):
     # --------------------------------------------------------------------
 
     def ADSB_identification(self, acid: 'acid'):
-        '''Encode aircraft identification ADS-B message for given aircraft index.'''
+        ''' Encode aircraft identification ADS-B message for given aircraft index. '''
         index = self.id2idx(acid)
         
         capability = traf.ADSBcapability[index]
@@ -221,7 +212,7 @@ class ADSBprotocol(core.Entity):
         
 
     def ADSB_position(self, acid: 'acid', even: bool):
-        '''Encode aircraft position ADS-B message for given aircraft index.'''
+        ''' Encode aircraft position ADS-B message for given aircraft index. '''
         index = self.id2idx(acid)
         
         capability = traf.ADSBcapability[index]
@@ -238,7 +229,7 @@ class ADSBprotocol(core.Entity):
 
     
     def id2idx(self, acid):
-        """Find index of aircraft id"""
+        ''' Find index of aircraft id. '''
         if not isinstance(acid, str):
             # id2idx is called for multiple id's
             # Fast way of finding indices of all ACID's in a given list
@@ -277,7 +268,7 @@ class ADSBprotocol(core.Entity):
 
     @stack.command(name='SQUAWK', brief='SQUAWK acid, [squawk]')
     def squawk(self, acid: 'acid', squawk: str = ''):
-        '''Set the squawk code of a given aircraft. If the code is not given, it returns the squawk code of the aircraft.'''
+        ''' Set the squawk code of a given aircraft. If the code is not given, it returns the squawk code of the aircraft. '''
         if squawk == '':
             return True, f'Aircraft {traf.id[acid]} squawk code is {traf.ADSBsquawk[acid]}.'
 

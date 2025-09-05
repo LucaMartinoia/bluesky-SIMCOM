@@ -1,7 +1,5 @@
 """ SIMCOM plugin that implements the ADS-B protocol. """
 
-""" TO DO: update function, POS function, labels! """
-
 from random import randint
 import numpy as np
 from types import SimpleNamespace
@@ -9,8 +7,8 @@ from types import SimpleNamespace
 from bluesky import core, stack, traf  #, settings, navdb, sim, scr, tools
 from bluesky.tools.aero import ft
 from bluesky.network.publisher import state_publisher
-from . import adsb_encoder as encoder
-from . import adsb_attacks as attacks
+from bluesky.network.sharedstate import addtopic
+from bluesky.plugins.SIMCOM import adsb_encoder as encoder
 
 ### Initialization function of your plugin. Do not change the name of this
 ### function, as it is the way BlueSky recognises this file as a plugin.
@@ -21,41 +19,35 @@ from . import adsb_attacks as attacks
 type_codes = dict(identification=4, position=9, velocity=19)
 DANGER_SQUAWKS = {'7500', '7600', '7700'}  # These squawk values are reserved for danger situations (hijack, generic problems).
 ACUPDATE_RATE = 5  # Update rate of aircraft update messages [Hz]
-_adsbprotocol = None  # Define the singleton globally
+
 # Map each attack type to a handler
 handlers = {
     'none': attacks.normal,
     'jamming': attacks.jamming,
 }
 
-def get_adsbprotocol():
-    ''' This function returns the singleton-instance of adsbprotocol.
-    Used by other "sim" plugins to interact with ADS-B data.'''
-    return _adsbprotocol
-
-"""
+'''
 def init_plugin():
     ''' Plugin initialisation function. '''
 
     print("\n--- Loading SIMCOM plugin: ADS-B protocol ---\n")
     # Instantiate our example entity
-    global _adsbprotocol  # refer to the global variable
-    _adsbprotocol = ADSBprotocol()
+    adsbprotocol = ADSBprotocol()
     
     # Configuration parameters
     config = {
         # The name of your plugin
-        'plugin_name': 'ADSBPROTOCOL',
+        'plugin_name': 'ADSBPROTOCOL_v2',
         # The type of this plugin.
         'plugin_type': 'sim',
         # The update function is called after traffic is updated.
-        'update': _adsbprotocol.update,
+        'update': adsbprotocol.update,
         # Reset contest
-        'reset': _adsbprotocol.reset
+        'reset': adsbprotocol.reset
         }
     # init_plugin() should always return a configuration dict.
     return config
-"""
+
 
 
 def is_valid_squawk(squawk):
@@ -77,6 +69,8 @@ class ADSBprotocol(core.Entity):
     def __init__(self):
         super().__init__()
 
+        # Get the signal for this topic
+        self.adsb_signal = addtopic("ADSBATTACKS")
         # All classes deriving from Entity can register lists and numpy arrays
         # that hold per-aircraft data. This way, their size is automatically
         # updated when aircraft are created or deleted in the simulation.
@@ -158,6 +152,12 @@ class ADSBprotocol(core.Entity):
         """If nothing strange is happening, the ADS-B data are updated based on the actual
         aircraft data. Otherwise, if there are cyber-attacks on the ADS-B protocol, the
         ADS-B data are determined by the attacks."""
+
+        data = self.send_aircraft_data()
+        print("publisher", data)
+        
+        # Emit the data
+        self.adsb_signal.emit(data)
 
         for attack_type, func in handlers.items():
             mask = self.attack == attack_type  # Define the mask for vectorialized computations
@@ -262,7 +262,6 @@ class ADSBprotocol(core.Entity):
             except:
                 return -1
             
-    @state_publisher(topic='ADSBDATA', dt=1000 // ACUPDATE_RATE)
     def send_aircraft_data(self):
         data = dict()
 
@@ -278,6 +277,7 @@ class ADSBprotocol(core.Entity):
         data['trk']               = self.ADSBtrk
 
         return data
+
 
     # --------------------------------------------------------------------
     #                      STACK COMMANDS
