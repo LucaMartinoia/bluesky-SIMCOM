@@ -55,6 +55,7 @@ full =[
     "PyQt6-WebEngine",
     "textual",
     "bluesky-guidata",
+    "rtree",
 ]
 # For headless (server-only) bluesky environment: pip install bluesky-simulator[headless]
 headless = [

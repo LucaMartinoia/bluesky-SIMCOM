@@ -1,16 +1,8 @@
-from pyModeS import adsb
 import pyModeS as pms
 from random import randint, uniform
 from textwrap import wrap
-from math import floor, log, cos, pi, acos, sqrt
+from math import floor, cos, pi, acos, sqrt
 import numpy as np
-
-import sys
-from pathlib import Path
-
-# Add the BlueSky root directory to sys.path
-#sys.path.append(str(Path(__file__).resolve().parents[3]))
-
 from bluesky.tools.aero import kts, ft, a0
 
 
@@ -20,13 +12,18 @@ from bluesky.tools.aero import kts, ft, a0
 # --------------------------------------------------------------------
 # --------------------------------------------------------------------
 
+
 def int2bin(val: int, bits: int) -> str:
-    """Convert integer to binary string with left-zero padding to 'bits' length."""
+    """Convert integer to binary string with
+    left-zero padding to 'bits' length."""
     return f"{val:0{bits}b}"
 
+
 def int2hex(val: int, digits: int) -> str:
-    """Convert integer to hex string with left-zero padding to 'digits' length."""
+    """Convert integer to hex string with
+    left-zero padding to 'digits' length."""
     return f"{val:0{digits}X}"
+
 
 def hex2bin(hexstr: str) -> str:
     """Convert a hexadecimal string to binary string, with zero fillings."""
@@ -34,22 +31,27 @@ def hex2bin(hexstr: str) -> str:
     binstr = bin(int(hexstr, 16))[2:].zfill(int(num_of_bits))
     return binstr
 
+
 def hex2int(hexstr: str) -> int:
     """Convert a hexadecimal string to integer."""
     return int(hexstr, 16)
+
 
 def bin2int(binstr: str) -> int:
     """Convert a binary string to integer."""
     return int(binstr, 2)
 
+
 def bin2hex(binstr: str) -> str:
     """Convert a binary string to hexadecimal string."""
     return "{0:X}".format(int(binstr, 2))
 
+
 def crc(msg: str, encode: bool = False) -> int:
     """Mode-S Cyclic Redundancy Check.
 
-    Detect if bit error occurs in the Mode-S message. When encode option is on, the checksum is generated.
+    Detect if bit error occurs in the Mode-S message.
+    When encode option is on, the checksum is generated.
 
     Args:
         msg: 28 bytes hexadecimal message string
@@ -59,7 +61,12 @@ def crc(msg: str, encode: bool = False) -> int:
 
     """
     # the CRC generator
-    G = [int("11111111", 2), int("11111010", 2), int("00000100", 2), int("10000000", 2)]
+    G = [
+        int("11111111", 2),
+        int("11111010", 2),
+        int("00000100", 2),
+        int("10000000", 2),
+    ]
 
     if encode:
         msg = msg[:-6] + "000000"
@@ -89,6 +96,7 @@ def crc(msg: str, encode: bool = False) -> int:
 
     return result
 
+
 # --------------------------------------------------------------------
 # --------------------------------------------------------------------
 #                           ADS-B ENCODING
@@ -100,10 +108,11 @@ def crc(msg: str, encode: bool = False) -> int:
 #                      IDENTIFICATION MESSAGES
 # --------------------------------------------------------------------
 
+
 def identification(ca: int, icao: str, tc: int, ec: int, callsign: str) -> str:
     """
     Encode ADS-B aircraft identification message.
-    
+
     capability field, icao address, type code, emitter category, callsign.
     """
     # Validate ICAO
@@ -111,9 +120,9 @@ def identification(ca: int, icao: str, tc: int, ec: int, callsign: str) -> str:
         raise ValueError("ICAO must be 6 hex digits")
 
     # DF and CA
-    df_bin = int2bin(17, 5)        # DF = 17 for ADS-B
-    ca_bin = int2bin(ca, 3)         # Capability
-    
+    df_bin = int2bin(17, 5)  # DF = 17 for ADS-B
+    ca_bin = int2bin(ca, 3)  # Capability
+
     # ICAO to binary
     icao_bin = hex2bin(icao).zfill(24)
 
@@ -124,13 +133,13 @@ def identification(ca: int, icao: str, tc: int, ec: int, callsign: str) -> str:
     # Callsign: uppercase, padded/truncated to 8 characters
     callsign = callsign.upper().ljust(8)[:8]
 
-    call_bin = ''
+    call_bin = ""
     for c in callsign:
-        if c == ' ':
+        if c == " ":
             idx = 32
-        elif 'A' <= c <= 'Z':
-            idx = ord(c) - ord('A') + 1
-        elif '0' <= c <= '9':
+        elif "A" <= c <= "Z":
+            idx = ord(c) - ord("A") + 1
+        elif "0" <= c <= "9":
             idx = ord(c)
         else:
             raise ValueError(f"Invalid character in callsign: {c}")
@@ -160,26 +169,40 @@ def identification(ca: int, icao: str, tc: int, ec: int, callsign: str) -> str:
 #                           POSITION MESSAGES
 # --------------------------------------------------------------------
 
-def position(ca: int, icao: str, TC: int, status: int, antenna: int, alt: float, time: int, even: bool, lat: float, lon: float) -> str:
+
+def position(
+    ca: int,
+    icao: str,
+    TC: int,
+    status: int,
+    antenna: int,
+    alt: float,
+    time: int,
+    even: bool,
+    lat: float,
+    lon: float,
+) -> str:
     # Only TC = 9 fully implemented
     """
     Encode ADS-B aircraft position message.
 
-    capability field, icao address, type code, surveillance status, antenna flag/NAC, altitude, time sync flag, parity, latitude, longitude.
+    capability field, icao address, type code, surveillance status,
+    antenna flag/NAC, altitude, time sync flag, parity, latitude, longitude.
     """
+
     def compute_NL(lat: float) -> int:
         """
         Compute NL (longitude zone number) function.
         """
-        NZ = 15 # Number of latitude zones N_z
-        if abs(lat) < 10**-6: # When near the equator, NL is fixed
+        NZ = 15  # Number of latitude zones N_z
+        if abs(lat) < 10**-6:  # When near the equator, NL is fixed
             return 59
-        elif abs(lat) == 87: # Might be necessary to add some tolerance in the future
+        elif abs(lat) == 87:  # Might be necessary to add some tolerance
             return 2
-        elif abs(lat) > 87: # Near the poles, NL is also fixed
+        elif abs(lat) > 87:  # Near the poles, NL is also fixed
             return 1
-        else: # Computes the NL
-            a = 1 - cos(pi / (2*NZ)) 
+        else:  # Computes the NL
+            a = 1 - cos(pi / (2 * NZ))
             b = cos(pi * lat / 180) ** 2
             nl = 2 * pi / (acos(1 - a / b))
             return int(floor(nl))
@@ -188,29 +211,35 @@ def position(ca: int, icao: str, TC: int, status: int, antenna: int, alt: float,
         """
         Encode latitude and longitude using CPR.
         """
-        NZ = 15 # Number of latitude zones N_z
-        NL = compute_NL(lat) # Number of longitude zones NL
-    
+        NZ = 15  # Number of latitude zones N_z
+        NL = compute_NL(lat)  # Number of longitude zones NL
+
         if even:
-            dLat = 360.0 / (4 * NZ) # Size of even (odd) latitude zones in degrees.
-            dLon = 360.0 / max(NL, 1) # The size of even (odd) longitude zones in degrees.
+            dLat = 360.0 / (4 * NZ)
+            dLon = 360.0 / max(
+                NL, 1
+            )  # The size of even (odd) longitude zones in degrees.
         else:
             dLat = 360.0 / (4 * NZ - 1)
             dLon = 360.0 / max(NL - 1, 1)
 
-        lat_index = floor(lat / dLat) # The index of the lat/lon zone.
+        lat_index = floor(lat / dLat)  # The index of the lat/lon zone.
         lon_index = floor(lon / dLon)
-        relative_lat = lat - dLat * lat_index # Lat/lon, relative to the zone.
+        relative_lat = lat - dLat * lat_index  # Lat/lon, relative to the zone.
         relative_lon = lon - dLon * lon_index
 
-        lat_cpr = int(relative_lat / dLat * 131072) # The relative lat, scaled to [0,1), times 2^17
+        lat_cpr = int(
+            relative_lat / dLat * 131072
+        )  # The relative lat, scaled to [0,1), times 2^17
         lon_cpr = int(relative_lon / dLon * 131072)
 
         return lat_cpr, lon_cpr
 
     def altitude_code_GNSS(alt: float) -> str:
         """
-        Encode altitude in 12-bit. With GNSS altitude, thus it is just the altitude in meters converted to binary, which however set the maximum altitude encodable at about 4000m.
+        Encode altitude in 12-bit. With GNSS altitude, thus it is just the
+        altitude in meters converted to binary, which however set the maximum
+        altitude encodable at about 4000m.
         """
         return int2bin(int(round(alt)), 12)
 
@@ -228,9 +257,9 @@ def position(ca: int, icao: str, TC: int, status: int, antenna: int, alt: float,
 
         gray_n500 = int2bin(int_to_gray(n500), 8)  # 8-bit
         gray_n100 = int2bin(int_to_gray(n100), 3)  # 3-bit
-        graystr = gray_n500+gray_n100
+        graystr = gray_n500 + gray_n100
 
-        bitstring = ['0'] * 12
+        bitstring = ["0"] * 12
         bitstring[0] = graystr[8]
         bitstring[1] = graystr[2]
         bitstring[2] = graystr[9]
@@ -238,27 +267,28 @@ def position(ca: int, icao: str, TC: int, status: int, antenna: int, alt: float,
         bitstring[4] = graystr[10]
         bitstring[5] = graystr[4]
         bitstring[6] = graystr[5]
-        bitstring[7] = '0' # Q bit
+        bitstring[7] = "0"  # Q bit
         bitstring[8] = graystr[6]
         bitstring[9] = graystr[0]
         bitstring[10] = graystr[7]
         bitstring[11] = graystr[1]
-        return ''.join(bitstring)
+        return "".join(bitstring)
 
     def altitude_code_barometric(alt: float) -> str:
         """
-        Encode barometric altitude into a 12-bit string according to ADS-B standard.
+        Encode barometric altitude into a 12-bit
+        string according to ADS-B standard.
         """
         # Convert to feet and round
         alt_ft = int(round(alt / ft))
-        
+
         # Upper limit for Q=1 encoding
         if 0 <= alt_ft < 50175:
             # Compute altitude code in 25 ft increments from -1000 ft
             alt_ft_rounded = int(round(alt_ft / 25.0) * 25)
-            N = (alt_ft + 1000) // 25
+            N = (alt_ft_rounded + 1000) // 25
             code = int2bin(N, 11)
-            full_bits = code[:7] + '1' + code[7:]  # Insert Q bit at bit position 7
+            full_bits = code[:7] + "1" + code[7:]  # Insert Q bit
         elif alt_ft >= 50175:
             full_bits = altitude_q0(alt_ft)
         else:
@@ -284,8 +314,10 @@ def position(ca: int, icao: str, TC: int, status: int, antenna: int, alt: float,
     x_bin_str = int2bin(x_bin, 17)
 
     # Assemble ME field
-    me_bin = tc_bin + ss_bin + saf_bin + alt_bin + time_bin + f_bin + y_bin_str + x_bin_str
-    
+    me_bin = (
+        tc_bin + ss_bin + saf_bin + alt_bin + time_bin + f_bin + y_bin_str + x_bin_str
+    )
+
     # Assemble full message (without CRC)
     msg_bin = df_bin + ca_bin + icao_bin + me_bin
 
@@ -303,21 +335,34 @@ def position(ca: int, icao: str, TC: int, status: int, antenna: int, alt: float,
 #                           VELOCITY MESSAGE
 # --------------------------------------------------------------------
 
-def velocity(ca: int, icao: str, IC_flag: int, NACv: int, gs_north: float, gs_east: float, vert_src: int, s_vert: float, GNSS_alt: float, baro_alt: float) -> str:
+
+def velocity(
+    ca: int,
+    icao: str,
+    IC_flag: int,
+    NACv: int,
+    gs_north: float,
+    gs_east: float,
+    vert_src: int,
+    s_vert: float,
+    GNSS_alt: float,
+    baro_alt: float,
+) -> str:
     # subTC 3 and 4 are not implemented
     """
     Encode ADS-B aircraft velocity message.
     """
+
     def encode_vertical_rate(s_vert):
         # Convert from m/s to ft/min
         vert_ftmin = s_vert / ft * 60
-    
+
         # Determine sign bit: 0 for climb, 1 for descent
         vert_sign = 0 if vert_ftmin >= 0 else 1
-    
+
         # Compute 9-bit vertical rate field
         vert_rate = int(abs(vert_ftmin) / 64) + 1
-    
+
         return vert_sign, vert_rate
 
     def encode_altitude_difference(GNSS_alt, baro_alt):
@@ -327,14 +372,14 @@ def velocity(ca: int, icao: str, IC_flag: int, NACv: int, gs_north: float, gs_ea
         # compute the DAlt field, in feet, 25 feet increment
         DAlt = int(round(abs(dif / ft) / 25)) + 1
 
-        SDif = 0 if dif >=0 else 1
+        SDif = 0 if dif >= 0 else 1
 
         return DAlt, SDif
 
     def encode_velocity_gs(gs_north, gs_east):
         # check if supersonic speed
         subTC = 1 if sqrt(gs_north**2 + gs_east**2) < a0 else 2
-        
+
         # compute sign of east-west and north-south ground velocities
         Dew = 0 if gs_east >= 0 else 1
         Dns = 0 if gs_north >= 0 else 1
@@ -352,9 +397,9 @@ def velocity(ca: int, icao: str, IC_flag: int, NACv: int, gs_north: float, gs_ea
     vert_sign, vert_rate = encode_vertical_rate(s_vert)
     DAlt, SDif = encode_altitude_difference(GNSS_alt, baro_alt)
     Dew, Vew, Dns, Vns, subTC = encode_velocity_gs(gs_north, gs_east)
-    TC = 19 # Type code is fixed for airborne velocity messages
-    IFR_flag = 0 # Always zero in modern ADSB versions
-    
+    TC = 19  # Type code is fixed for airborne velocity messages
+    IFR_flag = 0  # Always zero in modern ADSB versions
+
     # DF = 17
     df_bin = int2bin(17, 5)
     ca_bin = int2bin(ca, 3)
@@ -364,7 +409,7 @@ def velocity(ca: int, icao: str, IC_flag: int, NACv: int, gs_north: float, gs_ea
     tc_bin = int2bin(TC, 5)
     subTC_bin = int2bin(subTC, 3)
 
-    IC_flag_bin = int2bin(IC_flag, 1) # Intent Change flag
+    IC_flag_bin = int2bin(IC_flag, 1)  # Intent Change flag
     IFR_flag_bin = int2bin(IFR_flag, 1)
     NACv_bin = int2bin(NACv, 3)
 
@@ -375,13 +420,29 @@ def velocity(ca: int, icao: str, IC_flag: int, NACv: int, gs_north: float, gs_ea
     vert_src_bin = int2bin(vert_src, 1)
     vert_sign_bin = int2bin(vert_sign, 1)
     s_vert_bin = int2bin(vert_rate, 9)
-    res_bin = int2bin(0, 2) # 2 reserved bits, just set them to zero
+    res_bin = int2bin(0, 2)  # 2 reserved bits, just set them to zero
     SDif_bin = int2bin(SDif, 1)
     DAlt_bin = int2bin(DAlt, 7)
 
     # Assemble ME field
-    me_bin = tc_bin + subTC_bin + IC_flag_bin + IFR_flag_bin + NACv_bin + Dew_bin + Vew_bin + Dns_bin + Vns_bin + vert_src_bin + vert_sign_bin + s_vert_bin + res_bin + SDif_bin + DAlt_bin
-    
+    me_bin = (
+        tc_bin
+        + subTC_bin
+        + IC_flag_bin
+        + IFR_flag_bin
+        + NACv_bin
+        + Dew_bin
+        + Vew_bin
+        + Dns_bin
+        + Vns_bin
+        + vert_src_bin
+        + vert_sign_bin
+        + s_vert_bin
+        + res_bin
+        + SDif_bin
+        + DAlt_bin
+    )
+
     # Assemble full message (without CRC)
     msg_bin = df_bin + ca_bin + icao_bin + me_bin
 
@@ -394,36 +455,42 @@ def velocity(ca: int, icao: str, IC_flag: int, NACv: int, gs_north: float, gs_ea
 
     return bin2hex(full_msg).zfill(28)
 
-    
+
 # --------------------------------------------------------------------
 # --------------------------------------------------------------------
 #                              TESTS FUNCTIONS
 # --------------------------------------------------------------------
 # --------------------------------------------------------------------
 
+
 def _test_identification():
-    icao = f'{randint(0, 0xFFFFFF):06X}'
-    callsign = f'{randint(0, 0o7777):04o}'
+    icao = f"{randint(0, 0xFFFFFF):06X}"
+    callsign = f"{randint(0, 0o7777):04o}"
     capability = 5
     TC = 4
     ec = 3
-    msg = identification(capability, icao, TC, ec, callsign) # identification(ca: int, icao: str, tc: int, ec: int, callsign: str)
-    print("\n"
-          "-------------------------------------------------\n"
-          "--- Aircraft data for identification messages ---\n"
-          "-------------------------------------------------\n"
-          f"ICAO address:\t{icao}\n"
-          f"callsign:\t{callsign}\n"
-          f"ADS-B message:\t{msg}\n"
-         )
+    msg = identification(
+        capability, icao, TC, ec, callsign
+    )  # identification(ca: int, icao: str, tc: int, ec: int, callsign: str)
+    print(
+        "\n"
+        "-------------------------------------------------\n"
+        "--- Aircraft data for identification messages ---\n"
+        "-------------------------------------------------\n"
+        f"ICAO address:\t{icao}\n"
+        f"callsign:\t{callsign}\n"
+        f"ADS-B message:\t{msg}\n"
+    )
     pms.tell(msg)
 
-    print(f"\nICAO address match:\t{icao == pms.adsb.icao(msg)}\n"
-          f"Callsign match:\t\t{callsign == pms.adsb.callsign(msg).strip("_")}\n")
+    print(
+        f"\nICAO address match:\t{icao == pms.adsb.icao(msg)}\n"
+        f"Callsign match:\t\t{callsign == pms.adsb.callsign(msg).strip("_")}\n"
+    )
 
 
 def _test_position():
-    icao = f'{randint(0, 0xFFFFFF):06X}'
+    icao = f"{randint(0, 0xFFFFFF):06X}"
     capability = 5
     TC = 9
     status = 0
@@ -431,86 +498,103 @@ def _test_position():
     t0 = 0
     lat = uniform(-90, 270)
     lon = uniform(-90, 90)
-    alt = int(uniform(1000, 40000) * ft) # convert from feet to meters
-    msg0 = position(capability, icao, TC, status, antenna, alt, t0, True, lat, lon) # position(ca: int, icao: str, TC: int, status: int, antenna: int, alt: float, time: int, even: bool, lat: float, lon: float)
+    alt = int(uniform(1000, 40000) * ft)  # convert from feet to meters
+    msg0 = position(capability, icao, TC, status, antenna, alt, t0, True, lat, lon)
     t1 = 1
     msg1 = position(capability, icao, TC, status, antenna, alt, t1, False, lat, lon)
-    print("\n"
-          "--------------------------------------------\n"
-          "---- Aircraft data for position messages ---\n"
-          "--------------------------------------------\n"
-          f"ICAO address:\t\t{icao}\n"
-          f"Position LAT/LON:\t({lat}, {lon})\n"
-          f"Altitude:\t\t{alt/ft:0.0f} feet\n"
-          f"ADS-B even message:\t{msg0}\n"
-          f"ADS-B odd message:\t{msg1}\n"
-         )
+    print(
+        "\n"
+        "--------------------------------------------\n"
+        "---- Aircraft data for position messages ---\n"
+        "--------------------------------------------\n"
+        f"ICAO address:\t\t{icao}\n"
+        f"Position LAT/LON:\t({lat}, {lon})\n"
+        f"Altitude:\t\t{alt/ft:0.0f} feet\n"
+        f"ADS-B even message:\t{msg0}\n"
+        f"ADS-B odd message:\t{msg1}\n"
+    )
     pms.tell(msg0)
     print()
     pms.tell(msg1)
 
     lat_S, lon_S = pms.adsb.position(msg0, msg1, t0, t1)
     alt_S = pms.adsb.altitude(msg0)
-    
-    #print(f"\npyModeS position (lat, lon, alt): {lat_S, lon_S, alt_S}\n")
-    print(f"\nLatitude match:\t\t{abs(lat_S - lat) < 0.01}\n"
-          f"Longitude match:\t{abs(lon_S - lon) < 0.01}\n"
-          f"Altitude match:\t\t{abs(alt_S - alt / ft) < 25}\n")
+
+    # print(f"\npyModeS position (lat, lon, alt): {lat_S, lon_S, alt_S}\n")
+    print(
+        f"\nLatitude match:\t\t{abs(lat_S - lat) < 0.01}\n"
+        f"Longitude match:\t{abs(lon_S - lon) < 0.01}\n"
+        f"Altitude match:\t\t{abs(alt_S - alt / ft) < 25}\n"
+    )
 
 
 def _test_velocity():
-    icao = f'{randint(0, 0xFFFFFF):06X}'
+    icao = f"{randint(0, 0xFFFFFF):06X}"
     capability = 5
-    IC_flag = 0 # intent change flag
-    NACv = 3 # velocity accuracy (0 bad, 4 good)
-    vert_src = 1 # 0 GNSS, 1 barometric
-    
-    def random_velocity_components(max_speed=260): # speed in m/s
+    IC_flag = 0  # intent change flag
+    NACv = 3  # velocity accuracy (0 bad, 4 good)
+    vert_src = 1  # 0 GNSS, 1 barometric
+
+    def random_velocity_components(max_speed=260):  # speed in m/s
         """
-        Generate random north-south and east-west velocity components in knots, such that the total ground speed does not exceed `max_speed`.
+        Generate random north-south and east-west velocity components in knots,
+        such that the total ground speed does not exceed `max_speed`.
         """
         # Sample random direction (angle) and magnitude <= max_speed
         angle = uniform(0, 2 * np.pi)
         speed = uniform(0, max_speed)
-    
+
         # Compute components
-        v_ew = speed * np.cos(angle)  # East-West component (positive = eastward)
-        v_ns = speed * np.sin(angle)  # South-North component (positive = northward)
+        v_ew = speed * np.cos(angle)  # East-West component
+        v_ns = speed * np.sin(angle)  # South-North component
 
         return v_ns, v_ew
 
     v_ns, v_ew = random_velocity_components()
     speed = np.sqrt(v_ns**2 + v_ew**2)
     track = np.degrees(np.arctan2(v_ew, v_ns)) % 360
-    vert_s = uniform(-20, 20) # vertical rate in m/s
-    GNSS_alt = int(uniform(1000, 40000) * ft) # convert from feet to meters
-    baro_alt = GNSS_alt + int(uniform(0, 200) * ft) # convert from feet to meters
+    vert_s = uniform(-20, 20)  # vertical rate in m/s
+    GNSS_alt = int(uniform(1000, 40000) * ft)  # convert from ft to m
+    baro_alt = GNSS_alt + int(uniform(0, 200) * ft)  # convert from ft to m
     alt_dif = (GNSS_alt - baro_alt) / ft
-    msg = velocity(capability, icao, IC_flag, NACv, v_ns, v_ew, vert_src, vert_s, GNSS_alt, baro_alt) # velocity(ca: int, icao: str, IC_flag: int, NACv: int, gs_north: float, gs_east: float, vert_src: int, s_vert: float, GNSS_alt: float, baro_alt: float)
-    print("\n"
-          "-------------------------------------------\n"
-          "--- Aircraft data for velocity messages ---\n"
-          "-------------------------------------------\n"
-          f"ICAO address:\t\t{icao}\n"
-          f"Speed:\t\t\t{speed / kts:.0f} knots\n"
-          f"Track:\t\t\t{track} degrees\n"
-          f"Vertical rate:\t\t{vert_s / ft * 60:.1f} feet/minute\n"
-          f"GNSS-baro difference:\t{alt_dif:.0f} feet\n"
-          f"ADS-B message:\t\t{msg}\n"
-         )
+    msg = velocity(
+        capability,
+        icao,
+        IC_flag,
+        NACv,
+        v_ns,
+        v_ew,
+        vert_src,
+        vert_s,
+        GNSS_alt,
+        baro_alt,
+    )
+    print(
+        "\n"
+        "-------------------------------------------\n"
+        "--- Aircraft data for velocity messages ---\n"
+        "-------------------------------------------\n"
+        f"ICAO address:\t\t{icao}\n"
+        f"Speed:\t\t\t{speed / kts:.0f} knots\n"
+        f"Track:\t\t\t{track} degrees\n"
+        f"Vertical rate:\t\t{vert_s / ft * 60:.1f} feet/minute\n"
+        f"GNSS-baro difference:\t{alt_dif:.0f} feet\n"
+        f"ADS-B message:\t\t{msg}\n"
+    )
     pms.tell(msg)
 
     speed_S, track_S, vert_S, _ = pms.adsb.velocity(msg)
     alt_dif_S = pms.adsb.altitude_diff(msg)
-    #print(f"\npyModeS speed, track and climb: ({speed_S:.0f}, {track_S:.1f}, {vert_S:.0f})\n")
 
-    print(f"\nSpeed match:\t\t{abs(speed / kts - speed_S) <= 4}\n"
-          f"Track match:\t\t{abs(track - track_S) < 0.6}\n"
-          f"Vertical rate match:\t{abs(vert_s * 60 / ft - vert_S) < 64}\n"
-          f"GNSS-baro alt match:\t{abs(alt_dif_S - alt_dif) < 25}\n")
+    print(
+        f"\nSpeed match:\t\t{abs(speed / kts - speed_S) <= 4}\n"
+        f"Track match:\t\t{abs(track - track_S) < 0.6}\n"
+        f"Vertical rate match:\t{abs(vert_s * 60 / ft - vert_S) < 64}\n"
+        f"GNSS-baro alt match:\t{abs(alt_dif_S - alt_dif) < 25}\n"
+    )
 
 
-if __name__=='__main__':
+if __name__ == "__main__":
 
     _test_position()
     _test_identification()
