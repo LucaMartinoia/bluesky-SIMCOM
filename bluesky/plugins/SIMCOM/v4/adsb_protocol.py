@@ -8,12 +8,16 @@ from bluesky.plugins.SIMCOM import adsb_encoder as encoder
 """SIMCOM plugin that implements the ADS-B protocol."""
 
 """TO DO:
-1. Implement data-exchange based on ADS-B protocol encoding.
-2. Create new "danger function", since squawk isn't a thing.
-3. Create ADSB POS function.
-4. Add more labels versions with more data.
+1. Create ADSB POS function.
+2. Add more labels versions with more data.
+3. Add the line joining the ADS-B and true aircraft.
 
-Ther's a known bug: if I first create an AC and THEN load the plugin, it crashes. This happens because the with statement for some reason doubles the number of standard traf parameters (not the ADSB ones), so that the loops fail.
+No idea why this implementation works, with @timed_function both in protocol.py and attacks.py, but it does.
+
+There's a known bug: if I first create an AC and THEN load the plugin, it crashes. This happens because the
+'with' statement append traf entries to the newly created self.attr. However, if the new attributes
+are themselves traf.attr, it adds them again to traf, doubling the entries.
+
 One possible fix is to:
 1. Put a flag in create(n, new=True). If new=True, run super.create(), otherwise skip. This way, super.create() is called only on new AC and not on alraedy exising ACs.
 2. At the end of __init__, if ntraf>0, call create(ntraf, False), so that if AC already exists their ADSB parameters are initialized.
@@ -129,42 +133,41 @@ class ADSBprotocol(core.Entity):
 
         # Initialize ADS-B messages
         traf.ADSBmsg_pos_o[-n:] = [
-            self.ADSB_position(traf.id[j], False) for j in range(-n, 0)
+            ADSB_position(traf.id[j], False) for j in range(-n, 0)
         ]
         traf.ADSBmsg_pos_e[-n:] = [
-            self.ADSB_position(traf.id[j], True) for j in range(-n, 0)
+            ADSB_position(traf.id[j], True) for j in range(-n, 0)
         ]
-        traf.ADSBmsg_id[-n:] = [
-            self.ADSB_identification(traf.id[j]) for j in range(-n, 0)
-        ]
-        traf.ADSBmsg_v[-n:] = [self.ADSB_velocity(traf.id[j]) for j in range(-n, 0)]
+        traf.ADSBmsg_id[-n:] = [ADSB_identification(traf.id[j]) for j in range(-n, 0)]
+        traf.ADSBmsg_v[-n:] = [ADSB_velocity(traf.id[j]) for j in range(-n, 0)]
 
-    @core.timed_function(dt=0.5, hook="preupdate")  # runs every 0.5 simulated seconds
+    @core.timed_function(dt=0.5, hook="update")  # runs every 0.5 simulated seconds
     def update(self):
         """If nothing strange is happening, the ADS-B data are updated based
         on the actual aircraft data. Otherwise, if there are cyber-attacks
         on the ADS-B protocol, the ADS-B data are determined by the attacks."""
 
-        # Apply normal behaviour to safe aircraft
-        mask = traf.ADSBattack == "NONE"
-        traf.ADSBaltBaro[mask] = traf.alt[mask]
-        traf.ADSBlat[mask] = traf.lat[mask]
-        traf.ADSBlon[mask] = traf.lon[mask]
-        traf.ADSBtas[mask] = traf.tas[mask]
-        noise = np.random.uniform(-150, 150, size=np.sum(mask))
-        traf.ADSBaltGNSS[mask] = np.maximum(traf.alt[mask] + noise, 0)
-        traf.ADSBgsnorth[mask] = traf.gsnorth[mask]
-        traf.ADSBgseast[mask] = traf.gseast[mask]
-        traf.ADSBvs[mask] = traf.vs[mask]
-        traf.ADSBhdg[mask] = traf.hdg[mask]
-        traf.ADSBtrk[mask] = traf.trk[mask]
+        n = traf.ntraf
 
-        idxs = np.where(mask)[0]
-        # compute ADS-B messages
-        traf.ADSBmsg_pos_o[idxs] = [self.ADSB_position(traf.id[i], False) for i in idxs]
-        traf.ADSBmsg_pos_e[idxs] = [self.ADSB_position(traf.id[i], True) for i in idxs]
-        traf.ADSBmsg_id[idxs] = [self.ADSB_identification(traf.id[i]) for i in idxs]
-        traf.ADSBmsg_v[idxs] = [self.ADSB_velocity(traf.id[i]) for i in idxs]
+        traf.ADSBaltBaro[:n] = traf.alt[:n]
+        traf.ADSBlat[:n] = traf.lat[:n]
+        traf.ADSBlon[:n] = traf.lon[:n]
+        traf.ADSBtas[:n] = traf.tas[:n]
+
+        noise = np.random.uniform(-150, 150, size=n)
+        traf.ADSBaltGNSS[:n] = np.maximum(traf.alt[:n] + noise, 0)
+
+        traf.ADSBgsnorth[:n] = traf.gsnorth[:n]
+        traf.ADSBgseast[:n] = traf.gseast[:n]
+        traf.ADSBvs[:n] = traf.vs[:n]
+        traf.ADSBhdg[:n] = traf.hdg[:n]
+        traf.ADSBtrk[:n] = traf.trk[:n]
+
+        # Compute ADS-B messages for all aircraft
+        traf.ADSBmsg_pos_o[:n] = [ADSB_position(traf.id[i], False) for i in range(n)]
+        traf.ADSBmsg_pos_e[:n] = [ADSB_position(traf.id[i], True) for i in range(n)]
+        traf.ADSBmsg_id[:n] = [ADSB_identification(traf.id[i]) for i in range(n)]
+        traf.ADSBmsg_v[:n] = [ADSB_velocity(traf.id[i]) for i in range(n)]
 
     def reset(self):
         """Clear all traffic data upon simulation reset."""
@@ -176,106 +179,8 @@ class ADSBprotocol(core.Entity):
         super().reset()
 
     # --------------------------------------------------------------------
-    #                      ADS-B WRAPPER FUNCTIONS
-    # --------------------------------------------------------------------
-
-    def ADSB_identification(self, acid: "acid"):  # type: ignore
-        """Encode aircraft identification ADS-B
-        message for given aircraft index."""
-
-        index = self.id2idx(acid)
-
-        capability = traf.ADSBcapability[index]
-        icao = traf.ADSBicao[index]
-        emitter_category = traf.ADSBemitter_category[index]
-        callsign = traf.ADSBcallsign[index][:8].upper().ljust(8)
-        if len(traf.ADSBcallsign[index]) > 8:
-            stack.stack(
-                f"ECHO WARNING: Callsign {traf.ADSBcallsign[index]} too long,truncating to 8 characters"
-            )
-
-        # Encode and return hex string
-        return encoder.identification(
-            capability, icao, type_codes["identification"], emitter_category, callsign
-        )
-
-    def ADSB_position(self, acid: "acid", even: bool):  # type: ignore
-        """Encode aircraft position ADS-B message for given aircraft index."""
-        index = self.id2idx(acid)
-
-        capability = traf.ADSBcapability[index]
-        icao = traf.ADSBicao[index]
-        surveillance_status = traf.ADSBsurveillance_status[index]
-        antenna_flag = traf.ADSBantenna_flag[index]
-        alt = traf.ADSBaltBaro[index]
-        time_bit = traf.ADSBtime_bit[index]
-        lat = traf.ADSBlat[index]
-        lon = traf.ADSBlon[index]
-
-        # Encode and return hex string
-        return encoder.position(
-            capability,
-            icao,
-            type_codes["position"],
-            surveillance_status,
-            antenna_flag,
-            alt,
-            time_bit,
-            even,
-            lat,
-            lon,
-        )
-
-    def ADSB_velocity(self, acid: "acid"):  # type: ignore
-        """Encode aircraft position ADS-B message for given aircraft index."""
-        index = self.id2idx(acid)
-
-        capability = traf.ADSBcapability[index]
-        icao = traf.ADSBicao[index]
-        ic_flag = traf.ADSBintent_change[index]
-        NACv = traf.ADSBNACv[index]
-        gs_north = traf.ADSBgsnorth[index]
-        gs_east = traf.ADSBgseast[index]
-        vert_src = 1
-        s_vert = traf.ADSBvs[index]
-        GNSS_alt = traf.ADSBaltGNSS[index]
-        baro_alt = traf.ADSBaltBaro[index]
-
-        # Encode and return hex string
-        return encoder.velocity(
-            capability,
-            icao,
-            ic_flag,
-            NACv,
-            gs_north,
-            gs_east,
-            vert_src,
-            s_vert,
-            GNSS_alt,
-            baro_alt,
-        )
-
-    # --------------------------------------------------------------------
     #                      PUBLISHER AND UTILS
     # --------------------------------------------------------------------
-
-    def id2idx(self, acid):
-        """Find index of aircraft id."""
-
-        if not isinstance(acid, str):
-            # id2idx is called for multiple id's
-            # Fast way of finding indices of all ACID's in a given list
-            tmp = dict((v, i) for i, v in enumerate(traf.id))
-            # return [tmp.get(acidi, -1) for acidi in acid]
-        else:
-            # Catch last created id (* or # symbol)
-            if acid in ("#", "*"):
-                return traf.ntraf - 1
-
-            try:
-                return traf.id.index(acid.upper())
-            except:
-                return -1
 
     @state_publisher(topic="ADSBDATA", dt=1000 // ACUPDATE_RATE)
     def send_aircraft_data(self):
@@ -307,3 +212,106 @@ class ADSBprotocol(core.Entity):
         traf.ADSBsurveillance_status[acid] = int(status)
 
         return True, f"The surveillance status for {traf.id[acid]} is set to {status}."
+
+
+# --------------------------------------------------------------------
+#                      ADS-B WRAPPER FUNCTIONS
+# --------------------------------------------------------------------
+
+
+def ADSB_identification(acid: "acid"):  # type: ignore
+    """Encode aircraft identification ADS-B
+    message for given aircraft index."""
+
+    index = id2idx(acid)
+
+    capability = traf.ADSBcapability[index]
+    icao = traf.ADSBicao[index]
+    emitter_category = traf.ADSBemitter_category[index]
+    callsign = traf.ADSBcallsign[index][:8].upper().ljust(8)
+    if len(traf.ADSBcallsign[index]) > 8:
+        stack.stack(
+            f"ECHO WARNING: Callsign {traf.ADSBcallsign[index]} too long,truncating to 8 characters"
+        )
+
+    # Encode and return hex string
+    return encoder.identification(
+        capability, icao, type_codes["identification"], emitter_category, callsign
+    )
+
+
+def ADSB_position(acid: "acid", even: bool):  # type: ignore
+    """Encode aircraft position ADS-B message for given aircraft index."""
+    index = id2idx(acid)
+
+    capability = traf.ADSBcapability[index]
+    icao = traf.ADSBicao[index]
+    surveillance_status = traf.ADSBsurveillance_status[index]
+    antenna_flag = traf.ADSBantenna_flag[index]
+    alt = traf.ADSBaltBaro[index]
+    time_bit = traf.ADSBtime_bit[index]
+    lat = traf.ADSBlat[index]
+    lon = traf.ADSBlon[index]
+
+    # Encode and return hex string
+    return encoder.position(
+        capability,
+        icao,
+        type_codes["position"],
+        surveillance_status,
+        antenna_flag,
+        alt,
+        time_bit,
+        even,
+        lat,
+        lon,
+    )
+
+
+def ADSB_velocity(acid: "acid"):  # type: ignore
+    """Encode aircraft position ADS-B message for given aircraft index."""
+    index = id2idx(acid)
+
+    capability = traf.ADSBcapability[index]
+    icao = traf.ADSBicao[index]
+    ic_flag = traf.ADSBintent_change[index]
+    NACv = traf.ADSBNACv[index]
+    gs_north = traf.ADSBgsnorth[index]
+    gs_east = traf.ADSBgseast[index]
+    vert_src = 1
+    s_vert = traf.ADSBvs[index]
+    GNSS_alt = traf.ADSBaltGNSS[index]
+    baro_alt = traf.ADSBaltBaro[index]
+
+    # Encode and return hex string
+    return encoder.velocity(
+        capability,
+        icao,
+        ic_flag,
+        NACv,
+        gs_north,
+        gs_east,
+        vert_src,
+        s_vert,
+        GNSS_alt,
+        baro_alt,
+    )
+
+
+def id2idx(acid):
+    """Find index of aircraft id."""
+
+    if not isinstance(acid, str):
+        # id2idx is called for multiple id's
+        # Fast way of finding indices of all ACID's in a given list
+        tmp = dict((v, i) for i, v in enumerate(traf.id))
+        # return [tmp.get(acidi, -1) for acidi in acid]
+    else:
+        # Catch last created id (* or # symbol)
+        if acid in ("#", "*"):
+            return traf.ntraf - 1
+
+        try:
+            return traf.id.index(acid.upper())
+        except:
+            return -1

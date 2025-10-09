@@ -3,7 +3,11 @@ from bluesky import core, stack, traf  # , settings, navdb, sim, scr, tools
 import pyModeS as pms
 from bluesky.tools.aero import ft
 from bluesky.tools.misc import txt2alt
-from bluesky.plugins.SIMCOM import adsb_encoder as encoder
+from bluesky.plugins.SIMCOM.v4.adsb_protocol import (
+    ADSB_identification,
+    ADSB_position,
+    ADSB_velocity,
+)
 
 type_codes = dict(identification=4, position=9, velocity=19)
 
@@ -67,14 +71,17 @@ class ADSBattacks(core.Entity):
 
         # If AC under JAMMING attack, do nothing.
         mask = traf.ADSBattack == "FREEZE"
+        indices = np.where(mask)[0]
+
+        for i in indices:
+            traf.ADSBmsg_pos_e[i] = traf.ADSBattack_arg[i]["msg_pos_o"]
+            traf.ADSBmsg_pos_o[i] = traf.ADSBattack_arg[i]["msg_pos_e"]
 
     def mitm_hide(self):
         """Simulate jamming by deleting ADS-B outputs."""
 
         # If AC under JAMMING attack, do nothing.
         mask = traf.ADSBattack == "HIDE"
-
-        print(len(np.where(mask)[0]))
 
         if len(np.where(mask)[0]) > 0:
             traf.ADSBmsg_pos_e[mask] = None
@@ -95,34 +102,12 @@ class ADSBattacks(core.Entity):
             )
             alt = pms.adsb.altitude(str(traf.ADSBmsg_pos_e[i])) * ft
 
-            lat = lat + traf.ADSBattack_arg[i]["lat"]
-            lon = lon + traf.ADSBattack_arg[i]["lon"]
-            alt = alt + traf.ADSBattack_arg[i]["alt"]
+            traf.ADSBlat[i] = lat + traf.ADSBattack_arg[i]["lat"]
+            traf.ADSBlon[i] = lon + traf.ADSBattack_arg[i]["lon"]
+            traf.ADSBaltBaro[i] = alt + traf.ADSBattack_arg[i]["alt"]
 
-            traf.ADSBmsg_pos_o[i] = encoder.position(
-                traf.ADSBcapability[i],
-                traf.ADSBicao[i],
-                type_codes["position"],
-                traf.ADSBsurveillance_status[i],
-                traf.ADSBantenna_flag[i],
-                alt,
-                traf.ADSBtime_bit[i],
-                False,
-                lat,
-                lon,
-            )
-            traf.ADSBmsg_pos_e[i] = encoder.position(
-                traf.ADSBcapability[i],
-                traf.ADSBicao[i],
-                type_codes["position"],
-                traf.ADSBsurveillance_status[i],
-                traf.ADSBantenna_flag[i],
-                alt,
-                traf.ADSBtime_bit[i],
-                True,
-                lat,
-                lon,
-            )
+            traf.ADSBmsg_pos_o[i] = ADSB_position(traf.id[i], False)
+            traf.ADSBmsg_pos_e[i] = ADSB_position(traf.id[i], True)
 
     # --------------------------------------------------------------------
     #                      STACK COMMANDS
