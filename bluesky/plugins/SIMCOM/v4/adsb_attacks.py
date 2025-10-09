@@ -2,15 +2,17 @@ import numpy as np
 from bluesky import core, stack, traf  # , settings, navdb, sim, scr, tools
 import pyModeS as pms
 from bluesky.tools.aero import ft
+from bluesky.tools.misc import txt2alt
+from bluesky.plugins.SIMCOM import adsb_encoder as encoder
 
-attack_types = dict()
+type_codes = dict(identification=4, position=9, velocity=19)
 
 
 def init_plugin():
     """Plugin initialisation function."""
 
     # Instantiate singleton entity
-    adsbprotocol = ADSBattacks()
+    adsbattacks = ADSBattacks()
 
     print("\n--- Loading ADS-B plugin: attacks ---\n")
 
@@ -21,7 +23,7 @@ def init_plugin():
         # The update function is called after traffic is updated.
         # "update": adsbprotocol.update,
         # Reset contest
-        # "reset": adsbprotocol.reset,
+        "reset": adsbattacks.reset,
     }
     return config
 
@@ -42,8 +44,19 @@ class ADSBattacks(core.Entity):
         traf.ADSBattack_arg[-n:] = [{} for _ in range(n)]
 
     @core.timed_function(dt=0.5, hook="update")  # runs every 0.5 simulated seconds
-    def man_in_middle(self):
+    def man_in_the_middle(self):
         self.mitm_freeze()
+        self.mitm_hide()
+        self.mitm_jump()
+
+    def reset(self):
+        """Clear all traffic data upon simulation reset."""
+
+        # Some child reset functions depend on a correct value of self.ntraf
+        traf.ntraf = 0
+        # This ensures that the traffic arrays (which size is dynamic)
+        # are all reset as well, so all lat,lon,sdp etc but also objects adsb
+        super().reset()
 
     # --------------------------------------------------------------------
     #                      ATTACKS
@@ -61,8 +74,55 @@ class ADSBattacks(core.Entity):
         # If AC under JAMMING attack, do nothing.
         mask = traf.ADSBattack == "HIDE"
 
-        traf.ADSBmsg_pos_e[mask] = None
-        traf.ADSBmsg_pos_o[mask] = None
+        print(len(np.where(mask)[0]))
+
+        if len(np.where(mask)[0]) > 0:
+            traf.ADSBmsg_pos_e[mask] = None
+            traf.ADSBmsg_pos_o[mask] = None
+
+    def mitm_jump(self):
+        """Simulate a jummping attack that changes ADS-B position"""
+
+        mask = traf.ADSBattack == "JUMP"
+        indices = np.where(mask)[0]
+
+        for i in indices:
+            lat, lon = pms.adsb.airborne_position(
+                str(traf.ADSBmsg_pos_e[i]),
+                str(traf.ADSBmsg_pos_o[i]),
+                0,
+                1,
+            )
+            alt = pms.adsb.altitude(str(traf.ADSBmsg_pos_e[i])) * ft
+
+            lat = lat + traf.ADSBattack_arg[i]["lat"]
+            lon = lon + traf.ADSBattack_arg[i]["lon"]
+            alt = alt + traf.ADSBattack_arg[i]["alt"]
+
+            traf.ADSBmsg_pos_o[i] = encoder.position(
+                traf.ADSBcapability[i],
+                traf.ADSBicao[i],
+                type_codes["position"],
+                traf.ADSBsurveillance_status[i],
+                traf.ADSBantenna_flag[i],
+                alt,
+                traf.ADSBtime_bit[i],
+                False,
+                lat,
+                lon,
+            )
+            traf.ADSBmsg_pos_e[i] = encoder.position(
+                traf.ADSBcapability[i],
+                traf.ADSBicao[i],
+                type_codes["position"],
+                traf.ADSBsurveillance_status[i],
+                traf.ADSBantenna_flag[i],
+                alt,
+                traf.ADSBtime_bit[i],
+                True,
+                lat,
+                lon,
+            )
 
     # --------------------------------------------------------------------
     #                      STACK COMMANDS
@@ -75,26 +135,43 @@ class ADSBattacks(core.Entity):
 
     @attack.subcommand(name="FREEZE", brief="FREEZE acid")
     def attack_freeze(self, acid: "acid"):  # type: ignore
-        """Enable jamming attack for a given aircraft."""
+        """Enable freezing attack for a given aircraft."""
         traf.ADSBattack[acid] = "FREEZE"
-
         traf.ADSBattack_arg[acid] = {
             "msg_pos_o": traf.ADSBmsg_pos_o[acid],
             "msg_pos_e": traf.ADSBmsg_pos_e[acid],
         }
+
         return True, f"{traf.id[acid]} is under FREEZE attack."
 
     @attack.subcommand(name="HIDE", brief="HIDE acid")
     def attack_hide(self, acid: "acid"):  # type: ignore
         """Enable jamming attack for a given aircraft."""
         traf.ADSBattack[acid] = "HIDE"
+        traf.ADSBattack_arg[acid] = {
+            "msg_pos_o": None,
+            "msg_pos_e": None,
+        }
 
         return True, f"{traf.id[acid]} is under HIDE attack."
+
+    @attack.subcommand(name="JUMP", brief="JUMP acid, lat-diff,lon-diff,alt-diff")
+    def attack_jump(self, acid: "acid", lat: float, lon: float, alt: str):  # type: ignore
+        """Enable jumping attack for a given aircraft."""
+        traf.ADSBattack[acid] = "JUMP"
+        traf.ADSBattack_arg[acid] = {
+            "lat": lat,
+            "lon": lon,
+            "alt": txt2alt(alt),
+        }
+        return True, f"{traf.id[acid]} is under JUMP attack."
 
     @attack.subcommand(name="NONE", brief="NONE acid")
     def attack_none(self, acid: "acid"):  # type: ignore
         """Clear any attack for a given aircraft."""
         traf.ADSBattack[acid] = "NONE"
+        traf.ADSBattack_arg[acid] = {}
+
         return True, f"{traf.id[acid]} is under NONE attack."
 
     @attack.subcommand(name="STATUS", brief="STATUS acid")

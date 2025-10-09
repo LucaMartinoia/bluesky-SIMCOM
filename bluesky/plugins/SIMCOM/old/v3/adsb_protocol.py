@@ -41,6 +41,27 @@ def init_plugin():
         "reset": adsbprotocol.reset,
     }
     return config
+
+        # Apply normal behaviour to safe aircraft
+        mask = traf.ADSBattack == "NONE"
+        traf.ADSBaltBaro[mask] = traf.alt[mask]
+        traf.ADSBlat[mask] = traf.lat[mask]
+        traf.ADSBlon[mask] = traf.lon[mask]
+        traf.ADSBtas[mask] = traf.tas[mask]
+        noise = np.random.uniform(-150, 150, size=np.sum(mask))
+        traf.ADSBaltGNSS[mask] = np.maximum(traf.alt[mask] + noise, 0)
+        traf.ADSBgsnorth[mask] = traf.gsnorth[mask]
+        traf.ADSBgseast[mask] = traf.gseast[mask]
+        traf.ADSBvs[mask] = traf.vs[mask]
+        traf.ADSBhdg[mask] = traf.hdg[mask]
+        traf.ADSBtrk[mask] = traf.trk[mask]
+
+        idxs = np.where(mask)[0]
+        # compute ADS-B messages
+        traf.ADSBmsg_pos_o[idxs] = [self.ADSB_position(traf.id[i], False) for i in idxs]
+        traf.ADSBmsg_pos_e[idxs] = [self.ADSB_position(traf.id[i], True) for i in idxs]
+        traf.ADSBmsg_id[idxs] = [self.ADSB_identification(traf.id[i]) for i in idxs]
+        traf.ADSBmsg_v[idxs] = [self.ADSB_velocity(traf.id[i]) for i in idxs]
 """
 
 def is_valid_squawk(squawk):  ## TO DELETE

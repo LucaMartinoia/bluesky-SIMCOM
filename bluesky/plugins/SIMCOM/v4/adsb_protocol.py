@@ -4,7 +4,6 @@ from types import SimpleNamespace
 from bluesky import core, stack, traf  # , settings, navdb, sim, scr, tools
 from bluesky.network.publisher import state_publisher
 from bluesky.plugins.SIMCOM import adsb_encoder as encoder
-from .adsb_attacks import attack_types
 
 """SIMCOM plugin that implements the ADS-B protocol."""
 
