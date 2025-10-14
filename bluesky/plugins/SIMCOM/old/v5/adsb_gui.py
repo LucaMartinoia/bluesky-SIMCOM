@@ -5,7 +5,7 @@ from itertools import count
 import pyModeS as pms
 
 # Import the global bluesky objects. Uncomment the ones you need
-from bluesky import stack, settings  # , settings, navdb, sim, scr, tools
+from bluesky import core, stack, ui, settings  # , settings, navdb, sim, scr, tools
 from bluesky.ui.qtgl.glhelpers import (
     gl,
     RenderObject,
@@ -17,13 +17,10 @@ from bluesky.ui.qtgl.glhelpers import (
 from bluesky.network.subscriber import subscriber
 from bluesky.network.sharedstate import ActData
 from bluesky.network import context as ctx
-import bluesky as bs
 
 settings.set_variable_defaults(show_danger_traf=True, show_adsb_traf=True)
 
-test = None
-
-
+"""
 ### Initialization function of your plugin. Do not change the name of this
 ### function, as it is the way BlueSky recognises this file as a plugin.
 def init_plugin():
@@ -184,7 +181,6 @@ class ADSBRadar(RenderObject, layer=101):
         self.glsurface.makeCurrent()
 
         self.naircraft = len(data.id)
-
         lat, lon, alt, speed, track, callsigns = [], [], [], [], [], []
         # Decode using pyModeS
         for i in range(self.naircraft):
@@ -266,11 +262,3 @@ class ADSBRadar(RenderObject, layer=101):
         # Convert string to bool if provided, else keep None
         bool_flag = None if flag is None else flag.lower() in ("1", "true", "yes", "on")
         self.show_adsb = not self.show_adsb if bool_flag is None else bool_flag
-
-    @stack.command(name="MGHOST", brief="MGHOST num")
-    def mghost(self, num: int):
-        """Stack implementation of the multi-ghost attack."""
-
-        stack.forward(
-            f'INSIDE {" ".join(str(el) for el in bs.ref.area.bbox)} ATTACK MGHOST {num}'
-        )

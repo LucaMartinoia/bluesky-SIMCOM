@@ -1,4 +1,6 @@
+from random import randint
 import numpy as np
+from types import SimpleNamespace
 from bluesky import core, stack, traf  # , settings, navdb, sim, scr, tools
 from bluesky.network.publisher import state_publisher
 from bluesky.plugins.SIMCOM import adsb_encoder as encoder
@@ -10,11 +12,17 @@ from bluesky.plugins.SIMCOM import adsb_encoder as encoder
 2. Add more ADSB labels versions with more data.
 3. Add the line joining the ADS-B and true aircraft.
 
+There is one last refactoring that might help/be necessary:
+! WHILE THIS MIGHT HELP, NOT EVERYTHING CAN BE VECTORIALIZED, SINCE ENCODING/DECODING STILL WORKS 1 BY 1 !
+! It is more elegant, because I don't need to have the extra ADSBattack_arg and probably works better for multiple attacks,
+hoever, it is less true to the real mechanism: the man in the middle in this approach never uses the original positional messages !
+
 No idea why this implementation works, with @timed_function both in protocol.py and attacks.py, but it does.
 
 There's a known bug: if I first create an AC and THEN load the plugin, it crashes. This happens because the
 'with' statement append traf entries to the newly created self.attr. However, if the new attributes
 are themselves traf.attr, it adds them again to traf, doubling the entries.
+
 One possible fix is to:
 1. Put a flag in create(n, new=True). If new=True, run super.create(), otherwise skip. This way, super.create() is called only on new AC and not on alraedy exising ACs.
 2. At the end of __init__, if ntraf>0, call create(ntraf, False), so that if AC already exists their ADSB parameters are initialized.
@@ -28,7 +36,7 @@ One possible fix is to:
 type_codes = dict(identification=4, position=9, velocity=19)
 ACUPDATE_RATE = 5  # Update rate of aircraft update messages [Hz]
 
-
+"""
 def init_plugin():
     """Plugin initialisation function."""
 
@@ -141,27 +149,24 @@ class ADSBprotocol(core.Entity):
         on the actual aircraft data. Otherwise, if there are cyber-attacks
         on the ADS-B protocol, the ADS-B data are determined by the attacks."""
 
-        n = traf.ntraf
-        # GHOST aircraft do not have real data to update ADS-B
-        mask = traf.ADSBattack != "GHOST"
-        indices = np.where(mask)[0]
+        # Apply normal behaviour to safe aircraft
+        mask = traf.ADSBattack == "NONE"
+        idxs = np.where(mask)[0]
 
-        traf.ADSBaltBaro[mask] = traf.alt[:n]
-        traf.ADSBlat[mask] = traf.lat[:n]
-        traf.ADSBlon[mask] = traf.lon[:n]
-        traf.ADSBtas[:n] = traf.tas[:n]
-
-        noise = np.random.uniform(-150, 150, size=n)
-        traf.ADSBaltGNSS[mask] = np.maximum(traf.alt[:n] + noise, 0)
-
-        traf.ADSBgsnorth[mask] = traf.gsnorth[:n]
-        traf.ADSBgseast[mask] = traf.gseast[:n]
-        traf.ADSBvs[mask] = traf.vs[:n]
-        traf.ADSBhdg[mask] = traf.hdg[:n]
-        traf.ADSBtrk[:n] = traf.trk[:n]
+        traf.ADSBaltBaro[mask] = traf.alt[mask]
+        traf.ADSBlat[mask] = traf.lat[mask]
+        traf.ADSBlon[mask] = traf.lon[mask]
+        traf.ADSBtas[mask] = traf.tas[mask]
+        noise = np.random.uniform(-150, 150, size=np.sum(mask))
+        traf.ADSBaltGNSS[mask] = np.maximum(traf.alt[mask] + noise, 0)
+        traf.ADSBgsnorth[mask] = traf.gsnorth[mask]
+        traf.ADSBgseast[mask] = traf.gseast[mask]
+        traf.ADSBvs[mask] = traf.vs[mask]
+        traf.ADSBhdg[mask] = traf.hdg[mask]
+        traf.ADSBtrk[mask] = traf.trk[mask]
 
         # Compute ADS-B messages for all aircraft
-        for i in indices:
+        for i in idxs:
             traf.ADSBmsg_pos_o[i] = ADSB_position(traf.id[i], False)
             traf.ADSBmsg_pos_e[i] = ADSB_position(traf.id[i], True)
             traf.ADSBmsg_id[i] = ADSB_identification(traf.id[i])
@@ -199,8 +204,7 @@ class ADSBprotocol(core.Entity):
 
     @stack.command(name="STATUS", brief="STATUS acid, [status (0, 1, 2)]")
     def squawk(self, acid: "acid", status: str = ""):  # type: ignore
-        """Set the surveillance status of a given aircraft.
-        If the status is not given, it returns the status of the aircraft."""
+        """Set the surveillance status of a given aircraft. If the status is not given, it returns the status of the aircraft."""
 
         if status == "":
             return (
@@ -221,6 +225,7 @@ class ADSBprotocol(core.Entity):
 def ADSB_identification(acid: "acid"):  # type: ignore
     """Encode aircraft identification ADS-B
     message for given aircraft index."""
+
     index = id2idx(acid)
 
     capability = traf.ADSBcapability[index]

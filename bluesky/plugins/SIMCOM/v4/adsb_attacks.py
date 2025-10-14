@@ -1,13 +1,24 @@
 import numpy as np
-from bluesky import core, stack, traf  # , settings, navdb, sim, scr, tools
+from bluesky import (
+    core,
+    stack,
+    sim,
+    traf,
+    sim,
+    net,
+)  # , settings, navdb, sim, scr, tools
 import pyModeS as pms
-from bluesky.tools.aero import ft
+import bluesky as bs
+from bluesky.tools.aero import ft, Rearth, kts
+from random import randint
 from bluesky.tools.misc import txt2alt
 from bluesky.plugins.SIMCOM.v4.adsb_protocol import (
     ADSB_identification,
     ADSB_position,
     ADSB_velocity,
 )
+from bluesky.network.subscriber import subscriber
+from bluesky.network.publisher import PublisherMeta
 
 type_codes = dict(identification=4, position=9, velocity=19)
 
@@ -29,6 +40,7 @@ def init_plugin():
         # Reset contest
         "reset": adsbattacks.reset,
     }
+
     return config
 
 
@@ -55,12 +67,29 @@ class ADSBattacks(core.Entity):
 
     def reset(self):
         """Clear all traffic data upon simulation reset."""
-
         # Some child reset functions depend on a correct value of self.ntraf
+        self.remove_ghost_aircraft()
         traf.ntraf = 0
+
         # This ensures that the traffic arrays (which size is dynamic)
         # are all reset as well, so all lat,lon,sdp etc but also objects adsb
         super().reset()
+
+    def update_ADSBpos(self):
+        # Update position
+        mask = traf.ADSBattack != "NONE"
+        if not np.any(mask):
+            return  # Nothing to update
+        traf.ADSBaltBaro[mask] = np.round(
+            traf.ADSBaltBaro[mask] + traf.ADSBvs[mask] * sim.simdt, 6
+        )
+        traf.ADSBlat[mask] = traf.ADSBlat[mask] + np.degrees(
+            sim.simdt * traf.ADSBgsnorth[mask] / Rearth
+        )
+        coslat = np.cos(np.deg2rad(traf.ADSBlat[mask]))
+        traf.ADSBlon[mask] = traf.ADSBlon[mask] + np.degrees(
+            sim.simdt * traf.ADSBgseast[mask] / (coslat * Rearth)
+        )
 
     # --------------------------------------------------------------------
     #                      ATTACKS
@@ -68,8 +97,6 @@ class ADSBattacks(core.Entity):
 
     def mitm_freeze(self):
         """Simulate jamming by freezing ADS-B outputs to last known values."""
-
-        # If AC under JAMMING attack, do nothing.
         mask = traf.ADSBattack == "FREEZE"
         indices = np.where(mask)[0]
 
@@ -79,8 +106,6 @@ class ADSBattacks(core.Entity):
 
     def mitm_hide(self):
         """Simulate jamming by deleting ADS-B outputs."""
-
-        # If AC under JAMMING attack, do nothing.
         mask = traf.ADSBattack == "HIDE"
 
         if len(np.where(mask)[0]) > 0:
@@ -108,6 +133,11 @@ class ADSBattacks(core.Entity):
 
             traf.ADSBmsg_pos_o[i] = ADSB_position(traf.id[i], False)
             traf.ADSBmsg_pos_e[i] = ADSB_position(traf.id[i], True)
+
+    def mitm_ghost(self):
+        """Simulate a ghost aircraft"""
+
+        pass
 
     # --------------------------------------------------------------------
     #                      STACK COMMANDS
@@ -150,6 +180,181 @@ class ADSBattacks(core.Entity):
             "alt": txt2alt(alt),
         }
         return True, f"{traf.id[acid]} is under JUMP attack."
+
+    @attack.subcommand(name="MGHOST", brief="MGHOST num")
+    def attack_multi_ghost(self, num: int):  # type: ignore
+        """Enable ghost attacks with n aircraft."""
+
+        area = bs.ref.area.bbox
+
+        # Generate random callsigns and icao
+        idtmp = chr(randint(65, 90)) + chr(randint(65, 90)) + "{:>05}"
+        acid = [idtmp.format(i) for i in range(num)]
+        icao = [f"{randint(0, 0xFFFFFF):06X}" for i in range(num)]
+
+        # Generate random positions
+        aclat = np.random.rand(num) * (area[2] - area[0]) + area[0]
+        aclon = np.random.rand(num) * (area[3] - area[1]) + area[1]
+        achdg = np.random.randint(1, 360, num)
+        acalt = np.random.randint(2000, 39000, num) * ft
+        acspeed = np.random.randint(250, 450, num) * kts
+        rads = np.deg2rad(achdg)
+        gsnorth = acspeed * np.sin(rads)
+        gseast = acspeed * np.cos(rads)
+        acvs = np.zeros(num)
+
+        # Fix values
+        cap = np.full(num, 5, dtype=int)
+        emitter = np.full(num, 3, dtype=int)
+        time = np.zeros(num, dtype=int)
+        status = np.zeros(num, dtype=int)
+        antenna = np.ones(num, dtype=int)
+        intent = np.zeros(num, dtype=int)
+        NACv = np.full(num, 2, dtype=int)
+
+        traf.id = traf.id + acid
+
+        traf.ADSBattack = np.concatenate((traf.ADSBattack, np.array(["GHOST"] * num)))
+        traf.ADSBlat = np.concatenate((traf.ADSBlat, aclat))
+        traf.ADSBlon = np.concatenate((traf.ADSBlon, aclon))
+        traf.ADSBhdg = np.concatenate((traf.ADSBhdg, achdg))
+        traf.ADSBaltBaro = np.concatenate((traf.ADSBaltBaro, acalt))
+        traf.ADSBaltGNSS = np.concatenate((traf.ADSBaltGNSS, acalt))
+        traf.ADSBicao = np.concatenate((traf.ADSBicao, np.array(icao)))
+        traf.ADSBcallsign = traf.ADSBcallsign + acid
+        traf.ADSBgsnorth = np.concatenate((traf.ADSBgsnorth, gsnorth))
+        traf.ADSBgseast = np.concatenate((traf.ADSBgseast, gseast))
+        traf.ADSBvs = np.concatenate((traf.ADSBvs, acvs))
+
+        traf.ADSBcapability = np.concatenate((traf.ADSBcapability, cap))
+        traf.ADSBemitter_category = np.concatenate((traf.ADSBemitter_category, emitter))
+        traf.ADSBtime_bit = np.concatenate((traf.ADSBtime_bit, time))
+        traf.ADSBsurveillance_status = np.concatenate(
+            (traf.ADSBsurveillance_status, status)
+        )
+        traf.ADSBantenna_flag = np.concatenate((traf.ADSBantenna_flag, antenna))
+        traf.ADSBintent_change = np.concatenate((traf.ADSBintent_change, intent))
+        traf.ADSBNACv = np.concatenate((traf.ADSBNACv, NACv))
+
+        # Temporary arrays to hold new messages
+        new_pos_o = np.empty(num, dtype="<U28")
+        new_pos_e = np.empty(num, dtype="<U28")
+        new_id = np.empty(num, dtype="<U28")
+        new_v = np.empty(num, dtype="<U28")
+
+        for i in range(num):
+            idx = traf.ntraf + i
+            new_pos_o[i] = ADSB_position(traf.id[idx], False)
+            new_pos_e[i] = ADSB_position(traf.id[idx], True)
+            new_id[i] = ADSB_identification(traf.id[idx])
+            new_v[i] = ADSB_velocity(traf.id[idx])
+
+        # Concatenate with the existing arrays
+        traf.ADSBmsg_pos_o = np.concatenate((traf.ADSBmsg_pos_o, new_pos_o))
+        traf.ADSBmsg_pos_e = np.concatenate((traf.ADSBmsg_pos_e, new_pos_e))
+        traf.ADSBmsg_id = np.concatenate((traf.ADSBmsg_id, new_id))
+        traf.ADSBmsg_v = np.concatenate((traf.ADSBmsg_v, new_v))
+        traf.ADSBattack_arg.extend([{} for _ in range(num)])
+
+        return True, f"Created {num} GHOST aircraft."
+
+    @attack.subcommand(name="GHOST", brief="GHOST acid,lat,lon,hdg,alt,spd")
+    def attack_ghost(
+        self, callsign: str, lat: float, lon: float, hdg: float, alt: str, spd: float
+    ):
+        """Create a ghost aircraft."""
+        alt = txt2alt(alt)
+        spd = spd * kts
+        id = chr(randint(65, 90)) + chr(randint(65, 90)) + "{:>05}"
+
+        traf.ADSBattack = np.append(traf.ADSBattack, "GHOST")
+        traf.id.append(id.format(0))
+        traf.ADSBicao = np.append(traf.ADSBicao, f"{randint(0, 0xFFFFFF):06X}")
+
+        rads = np.deg2rad(hdg)
+        gsnorth = spd * np.sin(rads)
+        gseast = spd * np.cos(rads)
+
+        traf.ADSBcallsign.append(callsign)
+
+        traf.ADSBaltBaro = np.append(traf.ADSBaltBaro, alt)
+        traf.ADSBaltGNSS = np.append(traf.ADSBaltGNSS, alt)
+        traf.ADSBlat = np.append(traf.ADSBlat, lat)
+        traf.ADSBlon = np.append(traf.ADSBlon, lon)
+        traf.ADSBgsnorth = np.append(traf.ADSBgsnorth, gsnorth)
+        traf.ADSBgseast = np.append(traf.ADSBgseast, gseast)
+        traf.ADSBvs = np.append(traf.ADSBvs, 0)
+        traf.ADSBhdg = np.append(traf.ADSBhdg, hdg)
+
+        traf.ADSBcapability = np.append(traf.ADSBcapability, 5)
+        traf.ADSBemitter_category = np.append(traf.ADSBemitter_category, 3)
+        traf.ADSBtime_bit = np.append(traf.ADSBtime_bit, 0)
+        traf.ADSBsurveillance_status = np.append(traf.ADSBsurveillance_status, 0)
+        traf.ADSBantenna_flag = np.append(traf.ADSBantenna_flag, 1)
+        traf.ADSBintent_change = np.append(traf.ADSBintent_change, 0)
+        traf.ADSBNACv = np.append(traf.ADSBNACv, 2)
+        traf.ADSBattack_arg.append({})
+
+        traf.ADSBmsg_pos_o = np.append(
+            traf.ADSBmsg_pos_o, ADSB_position(traf.id[-1], False)
+        )
+        traf.ADSBmsg_pos_e = np.append(
+            traf.ADSBmsg_pos_e, ADSB_position(traf.id[-1], True)
+        )
+        traf.ADSBmsg_id = np.append(traf.ADSBmsg_id, ADSB_identification(traf.id[-1]))
+        traf.ADSBmsg_v = np.append(traf.ADSBmsg_v, ADSB_velocity(traf.id[-1]))
+
+        return True, f"GHOST aircraft created."
+
+    @stack.command(name="DELGHOST", brief="DELGHOST")
+    def remove_ghost_aircraft(self):
+        """Remove ghost aircraft"""
+        # Boolean mask: True for aircraft to keep
+        keep_mask = np.array(traf.ADSBattack) != "GHOST"
+
+        # Apply to all same-length traffic arrays
+        def filter_attr(name):
+            attr = getattr(traf, name, None)
+            if attr is None:
+                return
+            try:
+                if isinstance(attr, np.ndarray):
+                    setattr(traf, name, attr[keep_mask])
+                elif isinstance(attr, list):
+                    setattr(traf, name, [v for v, keep in zip(attr, keep_mask) if keep])
+            except Exception:
+                pass  # skip attributes of mismatched length
+
+        # Apply filter to all key traffic fields
+        for field in [
+            "id",
+            "ADSBlat",
+            "ADSBlon",
+            "ADSBaltBaro",
+            "ADSBaltGNSS",
+            "ADSBicao",
+            "ADSBvs",
+            "ADSBhdg",
+            "ADSBgsnorth",
+            "ADSBgseast",
+            "ADSBattack",
+            "ADSBcapability",
+            "ADSBemitter_category",
+            "ADSBtime_bit",
+            "ADSBsurveillance_status",
+            "ADSBantenna_flag",
+            "ADSBintent_change",
+            "ADSBNACv",
+            "ADSBmsg_pos_o",
+            "ADSBmsg_pos_e",
+            "ADSBmsg_id",
+            "ADSBmsg_v",
+            "ADSBcallsign",
+        ]:
+            filter_attr(field)
+
+        # Update counters
+        traf.ntraf = len(traf.id)
 
     @attack.subcommand(name="NONE", brief="NONE acid")
     def attack_none(self, acid: "acid"):  # type: ignore
