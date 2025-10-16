@@ -1,7 +1,5 @@
 # Example scenario
 
-00:00:00.50>PLUGIN LOAD ADSBPROTOCOL
-
 00:00:00.50>CRE KL204,B744,52,4,90,FL250,350
 
 # Create a B747-400 with call sign KL204

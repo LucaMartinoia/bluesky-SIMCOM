@@ -5,7 +5,7 @@ from itertools import count
 import pyModeS as pms
 
 # Import the global bluesky objects. Uncomment the ones you need
-from bluesky import stack, settings  # , settings, navdb, sim, scr, tools
+from bluesky import stack, settings, ref  # , settings, navdb, sim, scr, tools
 from bluesky.ui.qtgl.glhelpers import (
     gl,
     RenderObject,
@@ -17,11 +17,8 @@ from bluesky.ui.qtgl.glhelpers import (
 from bluesky.network.subscriber import subscriber
 from bluesky.network.sharedstate import ActData
 from bluesky.network import context as ctx
-import bluesky as bs
 
 settings.set_variable_defaults(show_danger_traf=True, show_adsb_traf=True)
-
-test = None
 
 
 ### Initialization function of your plugin. Do not change the name of this
@@ -29,7 +26,8 @@ test = None
 def init_plugin():
     """Plugin initialisation function."""
 
-    print("\n--- Loading SIMCOM GUI plugin ---\n")
+    print("SIMCOM: Loading ADS-B GUI plugin...")
+
     # Configuration parameters
     config = {
         # The name of your plugin
@@ -41,6 +39,8 @@ def init_plugin():
     stack.stack("LABEL 0")  # Hide the standard traffic labels
     addvisual("ADSBRADAR")
 
+    print("SIMCOM: All ADS-B plugins loaded!")
+
     # init_plugin() should always return a configuration dict.
     return config
 
@@ -51,12 +51,6 @@ green_clr = np.array((0, 255, 0, 255), dtype=np.uint8)
 flash_mult = 4  # The multiplier for the danger flashes.
 
 
-### Entities in BlueSky are objects that are created only once (called singleton)
-### which implement some traffic or other simulation functionality.
-### To define an entity that ADDS functionality to BlueSky, create a class that
-### inherits from bluesky.core.Entity.
-### To replace existing functionality in BlueSky, inherit from the class that
-### provides the original implementation (see for example the asas/eby plugin).
 class ADSBRadar(RenderObject, layer=101):
     """GUI for ADS-B traffic and danger screen flashes on radar."""
 
@@ -139,7 +133,7 @@ class ADSBRadar(RenderObject, layer=101):
             self.aclabels.draw(n_instances=self.naircraft)
 
     def update_colors(self, data):
-        """Update aircraft color based on danger flags. Flash red every 4 ticks."""
+        """Update aircraft color based on danger flags. Flashes red every 4 ticks."""
 
         def color_switch(flag, color):
             return red_clr if flag and np.all(color == green_clr) else green_clr
@@ -269,8 +263,8 @@ class ADSBRadar(RenderObject, layer=101):
 
     @stack.command(name="MGHOST", brief="MGHOST num")
     def mghost(self, num: int):
-        """Stack implementation of the multi-ghost attack."""
+        """Creates n random GHOST aircraft on screen."""
 
         stack.forward(
-            f'INSIDE {" ".join(str(el) for el in bs.ref.area.bbox)} ATTACK MGHOST {num}'
+            f'INSIDE {" ".join(str(el) for el in ref.area.bbox)} ATTACK MGHOST {num}'
         )

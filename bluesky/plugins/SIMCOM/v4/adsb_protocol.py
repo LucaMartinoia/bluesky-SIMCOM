@@ -3,36 +3,25 @@ from bluesky import core, stack, traf  # , settings, navdb, sim, scr, tools
 from bluesky.network.publisher import state_publisher
 from bluesky.plugins.SIMCOM import adsb_encoder as encoder
 
-"""SIMCOM plugin that implements the ADS-B protocol."""
-
-"""TO DO:
-1. Create ADSB stack functions.
-2. Add more ADSB labels versions with more data.
-3. Add the line joining the ADS-B and true aircraft.
+"""SIMCOM plugin that implements the ADS-B protocol.
 
 No idea why this implementation works, with @timed_function both in protocol.py and attacks.py, but it does.
-
-There's a known bug: if I first create an AC and THEN load the plugin, it crashes. This happens because the
-'with' statement append traf entries to the newly created self.attr. However, if the new attributes
-are themselves traf.attr, it adds them again to traf, doubling the entries.
-One possible fix is to:
-1. Put a flag in create(n, new=True). If new=True, run super.create(), otherwise skip. This way, super.create() is called only on new AC and not on alraedy exising ACs.
-2. At the end of __init__, if ntraf>0, call create(ntraf, False), so that if AC already exists their ADSB parameters are initialized.
-3. Remove by hand the empty strings in the standard traf parameters (or at least in traf.id)
 """
 
 # Type Codes for ADS-B messages.
 # identification: 4. Identification is 1-4.
 # position: 9. Airborne position is 9-18 (baro alt) or 20-22 (GNSS alt)
 # velocity: 19, fixed.
-type_codes = dict(identification=4, position=9, velocity=19)
+TYPE_CODES = dict(identification=4, position=9, velocity=19)
 ACUPDATE_RATE = 5  # Update rate of aircraft update messages [Hz]
+ADSB_UPDATE = 0.5  # Update dt for ADS-B messages [s]
 
 
 def init_plugin():
     """Plugin initialisation function."""
 
-    print("\n--- Loading SIMCOM plugin: ADS-B protocol ---\n")
+    print("SIMCOM: Loading ADS-B protocol plugin...")
+
     # Instantiate singleton entity
     adsbprotocol = ADSBprotocol()
 
@@ -45,6 +34,7 @@ def init_plugin():
         # Reset contest
         "reset": adsbprotocol.reset,
     }
+
     return config
 
 
@@ -90,6 +80,7 @@ class ADSBprotocol(core.Entity):
     def create(self, n=1):
         """This function gets called automatically
         when new aircraft are created."""
+
         super().create(n)
 
         # Initialize the attack flags
@@ -135,14 +126,15 @@ class ADSBprotocol(core.Entity):
             traf.ADSBmsg_id[j] = ADSB_identification(traf.id[j])
             traf.ADSBmsg_v[j] = ADSB_velocity(traf.id[j])
 
-    @core.timed_function(dt=0.5, hook="update")  # runs every 0.5 simulated seconds
-    def update(self):
-        """If nothing strange is happening, the ADS-B data are updated based
-        on the actual aircraft data. Otherwise, if there are cyber-attacks
-        on the ADS-B protocol, the ADS-B data are determined by the attacks."""
+    @core.timed_function(
+        dt=ADSB_UPDATE, hook="update"
+    )  # runs every 0.5 simulated seconds
+    def ADSBupdate(self):
+        """the ADS-B data are updated based on the actual aircraft data, except for
+        GHOST aircraft."""
 
         n = traf.ntraf
-        # GHOST aircraft do not have real data to update ADS-B
+        # GHOST aircraft do not have real data to update ADS-B fields
         mask = traf.ADSBattack != "GHOST"
         indices = np.where(mask)[0]
 
@@ -182,6 +174,13 @@ class ADSBprotocol(core.Entity):
 
     @state_publisher(topic="ADSBDATA", dt=1000 // ACUPDATE_RATE)
     def send_aircraft_data(self):
+        """Broadcast ADS-B data to the GPU for displaying.
+        The update rate is higher than in real world, so it includes dead reckoning.
+
+        The id is to keep track of AC, the status is not necessary in theory
+        (contained in velocity messages), but in practice pyModeS has no way
+        to extract the status field from ADS-B messages."""
+
         data = dict()
 
         data["id"] = traf.id
@@ -197,7 +196,7 @@ class ADSBprotocol(core.Entity):
     #                      STACK COMMANDS
     # --------------------------------------------------------------------
 
-    @stack.command(name="STATUS", brief="STATUS acid, [status (0, 1, 2)]")
+    @stack.command(name="STATUS", brief="STATUS acid,[status (0, 1, 2)]")
     def squawk(self, acid: "acid", status: str = ""):  # type: ignore
         """Set the surveillance status of a given aircraft.
         If the status is not given, it returns the status of the aircraft."""
@@ -219,8 +218,8 @@ class ADSBprotocol(core.Entity):
 
 
 def ADSB_identification(acid: "acid"):  # type: ignore
-    """Encode aircraft identification ADS-B
-    message for given aircraft index."""
+    """Encode identification ADS-B message for given aircraft index."""
+
     index = id2idx(acid)
 
     capability = traf.ADSBcapability[index]
@@ -234,12 +233,13 @@ def ADSB_identification(acid: "acid"):  # type: ignore
 
     # Encode and return hex string
     return encoder.identification(
-        capability, icao, type_codes["identification"], emitter_category, callsign
+        capability, icao, TYPE_CODES["identification"], emitter_category, callsign
     )
 
 
 def ADSB_position(acid: "acid", even: bool):  # type: ignore
-    """Encode aircraft position ADS-B message for given aircraft index."""
+    """Encode position ADS-B message for given aircraft index."""
+
     index = id2idx(acid)
 
     capability = traf.ADSBcapability[index]
@@ -255,7 +255,7 @@ def ADSB_position(acid: "acid", even: bool):  # type: ignore
     return encoder.position(
         capability,
         icao,
-        type_codes["position"],
+        TYPE_CODES["position"],
         surveillance_status,
         antenna_flag,
         alt,
@@ -267,7 +267,8 @@ def ADSB_position(acid: "acid", even: bool):  # type: ignore
 
 
 def ADSB_velocity(acid: "acid"):  # type: ignore
-    """Encode aircraft position ADS-B message for given aircraft index."""
+    """Encode velocity ADS-B message for given aircraft index."""
+
     index = id2idx(acid)
 
     capability = traf.ADSBcapability[index]

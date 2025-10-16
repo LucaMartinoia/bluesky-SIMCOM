@@ -5,10 +5,9 @@ from bluesky import (
     sim,
     traf,
     sim,
-    net,
+    ref,
 )  # , settings, navdb, sim, scr, tools
 import pyModeS as pms
-import bluesky as bs
 from bluesky.tools.aero import ft, Rearth, kts
 from random import randint
 from bluesky.tools.misc import txt2alt
@@ -16,27 +15,26 @@ from bluesky.plugins.SIMCOM.v4.adsb_protocol import (
     ADSB_identification,
     ADSB_position,
     ADSB_velocity,
+    ADSB_UPDATE,
 )
-from bluesky.network.subscriber import subscriber
-from bluesky.network.publisher import PublisherMeta
 
-type_codes = dict(identification=4, position=9, velocity=19)
+"""SIMCOM plugin that implements cyber-attacks on the ADS-B protocol."""
 
 
 def init_plugin():
     """Plugin initialisation function."""
 
+    print("SIMCOM: Loading ADS-B attack plugin...")
+
     # Instantiate singleton entity
     adsbattacks = ADSBattacks()
-
-    print("\n--- Loading ADS-B plugin: attacks ---\n")
 
     # Configuration parameters
     config = {
         "plugin_name": "ADSBATTACKS",
         "plugin_type": "sim",
         # The update function is called after traffic is updated.
-        # "update": adsbprotocol.update,
+        "update": adsbattacks.update_ADSBpos,
         # Reset contest
         "reset": adsbattacks.reset,
     }
@@ -48,6 +46,8 @@ class ADSBattacks(core.Entity):
     def __init__(self):
         super().__init__()
 
+        self.attack_str = "FREEZE, HIDE, JUMP, MGHOST, GHOST, NONE, STATUS, DELGHOST"
+
         # All classes deriving from Entity can register lists and numpy arrays
         # that hold per-aircraft data. This way, their size is automatically
         # updated when aircraft are created or deleted in the simulation.
@@ -55,15 +55,25 @@ class ADSBattacks(core.Entity):
             traf.ADSBattack_arg = []
 
     def create(self, n=1):
+        """When new AC are created, they are appended with a new field that stores
+        the cyber-attack parameters."""
+
         super().create(n)
 
         traf.ADSBattack_arg[-n:] = [{} for _ in range(n)]
 
-    @core.timed_function(dt=0.5, hook="update")  # runs every 0.5 simulated seconds
+    @core.timed_function(
+        dt=ADSB_UPDATE, hook="update"
+    )  # runs every 0.5 simulated seconds
     def man_in_the_middle(self):
+        """This function is called every 0.5s, right after ADSBupdate in protocol.py.
+        It overwrites the ADS-B messages depending on the attack before they are sent to the GPU.
+        """
+
         self.mitm_freeze()
         self.mitm_hide()
         self.mitm_jump()
+        self.mitm_ghost()
 
     def reset(self):
         """Clear all traffic data upon simulation reset."""
@@ -76,13 +86,16 @@ class ADSBattacks(core.Entity):
         super().reset()
 
     def update_ADSBpos(self):
-        # Update position
-        mask = traf.ADSBattack != "NONE"
+        """Update the ADS-B position for ghost AC."""
+
+        mask = traf.ADSBattack == "GHOST"
         if not np.any(mask):
             return  # Nothing to update
+
         traf.ADSBaltBaro[mask] = np.round(
             traf.ADSBaltBaro[mask] + traf.ADSBvs[mask] * sim.simdt, 6
         )
+        traf.ADSBaltGNSS[mask] = traf.ADSBaltBaro[mask]
         traf.ADSBlat[mask] = traf.ADSBlat[mask] + np.degrees(
             sim.simdt * traf.ADSBgsnorth[mask] / Rearth
         )
@@ -97,6 +110,7 @@ class ADSBattacks(core.Entity):
 
     def mitm_freeze(self):
         """Simulate jamming by freezing ADS-B outputs to last known values."""
+
         mask = traf.ADSBattack == "FREEZE"
         indices = np.where(mask)[0]
 
@@ -106,14 +120,16 @@ class ADSBattacks(core.Entity):
 
     def mitm_hide(self):
         """Simulate jamming by deleting ADS-B outputs."""
-        mask = traf.ADSBattack == "HIDE"
 
-        if len(np.where(mask)[0]) > 0:
+        mask = traf.ADSBattack == "HIDE"
+        indices = np.where(mask)[0]
+
+        if len(indices) > 0:
             traf.ADSBmsg_pos_e[mask] = None
             traf.ADSBmsg_pos_o[mask] = None
 
     def mitm_jump(self):
-        """Simulate a jummping attack that changes ADS-B position"""
+        """Simulate a jummping attack that changes ADS-B position."""
 
         mask = traf.ADSBattack == "JUMP"
         indices = np.where(mask)[0]
@@ -135,22 +151,31 @@ class ADSBattacks(core.Entity):
             traf.ADSBmsg_pos_e[i] = ADSB_position(traf.id[i], True)
 
     def mitm_ghost(self):
-        """Simulate a ghost aircraft"""
+        """Simulate ghost aircraft."""
 
-        pass
+        mask = traf.ADSBattack == "GHOST"
+        indices = np.where(mask)[0]
+
+        for i in indices:
+            traf.ADSBmsg_pos_o[i] = ADSB_position(traf.id[i], False)
+            traf.ADSBmsg_pos_e[i] = ADSB_position(traf.id[i], True)
+            traf.ADSBmsg_v[i] = ADSB_velocity(traf.id[i])
+            traf.ADSBmsg_id[i] = ADSB_identification(traf.id[i])
 
     # --------------------------------------------------------------------
     #                      STACK COMMANDS
     # --------------------------------------------------------------------
 
-    @stack.commandgroup(name="ATTACK", brief="ATTACK commands: FREEZE, NONE, STATUS")
+    @stack.commandgroup(name="ATTACK", brief="ATTACK commands")
     def attack(self):
-        """Group of attack-related commands."""
-        return True, ("ATTACK command\nPossible subcommands: FREEZE, NONE, STATUS")
+        """Cyber-attack related commands."""
+
+        return True, (f"ATTACK command\nPossible subcommands: {self.attack_str}.")
 
     @attack.subcommand(name="FREEZE", brief="FREEZE acid")
     def attack_freeze(self, acid: "acid"):  # type: ignore
-        """Enable freezing attack for a given aircraft."""
+        """FREEZE attack for a given aircraft."""
+
         traf.ADSBattack[acid] = "FREEZE"
         traf.ADSBattack_arg[acid] = {
             "msg_pos_o": traf.ADSBmsg_pos_o[acid],
@@ -161,7 +186,8 @@ class ADSBattacks(core.Entity):
 
     @attack.subcommand(name="HIDE", brief="HIDE acid")
     def attack_hide(self, acid: "acid"):  # type: ignore
-        """Enable jamming attack for a given aircraft."""
+        """HIDE attack for a given aircraft."""
+
         traf.ADSBattack[acid] = "HIDE"
         traf.ADSBattack_arg[acid] = {
             "msg_pos_o": None,
@@ -170,9 +196,10 @@ class ADSBattacks(core.Entity):
 
         return True, f"{traf.id[acid]} is under HIDE attack."
 
-    @attack.subcommand(name="JUMP", brief="JUMP acid, lat-diff,lon-diff,alt-diff")
+    @attack.subcommand(name="JUMP", brief="JUMP acid,lat-diff,lon-diff,alt-diff")
     def attack_jump(self, acid: "acid", lat: float, lon: float, alt: str):  # type: ignore
-        """Enable jumping attack for a given aircraft."""
+        """JUMP attack for a given aircraft."""
+
         traf.ADSBattack[acid] = "JUMP"
         traf.ADSBattack_arg[acid] = {
             "lat": lat,
@@ -183,9 +210,9 @@ class ADSBattacks(core.Entity):
 
     @attack.subcommand(name="MGHOST", brief="MGHOST num")
     def attack_multi_ghost(self, num: int):  # type: ignore
-        """Enable ghost attacks with n aircraft."""
+        """Creates n random GHOST aircraft."""
 
-        area = bs.ref.area.bbox
+        area = ref.area.bbox
 
         # Generate random callsigns and icao
         idtmp = chr(randint(65, 90)) + chr(randint(65, 90)) + "{:>05}"
@@ -212,6 +239,7 @@ class ADSBattacks(core.Entity):
         intent = np.zeros(num, dtype=int)
         NACv = np.full(num, 2, dtype=int)
 
+        # Append ghost values to ADS-B fields
         traf.id = traf.id + acid
 
         traf.ADSBattack = np.concatenate((traf.ADSBattack, np.array(["GHOST"] * num)))
@@ -242,13 +270,6 @@ class ADSBattacks(core.Entity):
         new_id = np.empty(num, dtype="<U28")
         new_v = np.empty(num, dtype="<U28")
 
-        for i in range(num):
-            idx = traf.ntraf + i
-            new_pos_o[i] = ADSB_position(traf.id[idx], False)
-            new_pos_e[i] = ADSB_position(traf.id[idx], True)
-            new_id[i] = ADSB_identification(traf.id[idx])
-            new_v[i] = ADSB_velocity(traf.id[idx])
-
         # Concatenate with the existing arrays
         traf.ADSBmsg_pos_o = np.concatenate((traf.ADSBmsg_pos_o, new_pos_o))
         traf.ADSBmsg_pos_e = np.concatenate((traf.ADSBmsg_pos_e, new_pos_e))
@@ -262,7 +283,7 @@ class ADSBattacks(core.Entity):
     def attack_ghost(
         self, callsign: str, lat: float, lon: float, hdg: float, alt: str, spd: float
     ):
-        """Create a ghost aircraft."""
+        """Create a GHOST aircraft."""
         alt = txt2alt(alt)
         spd = spd * kts
         id = chr(randint(65, 90)) + chr(randint(65, 90)) + "{:>05}"
@@ -306,9 +327,10 @@ class ADSBattacks(core.Entity):
 
         return True, f"GHOST aircraft created."
 
-    @stack.command(name="DELGHOST", brief="DELGHOST")
+    @attack.subcommand(name="DELGHOST", brief="DELGHOST")
     def remove_ghost_aircraft(self):
-        """Remove ghost aircraft"""
+        """Remove all ghost aircraft."""
+
         # Boolean mask: True for aircraft to keep
         keep_mask = np.array(traf.ADSBattack) != "GHOST"
 
@@ -359,14 +381,19 @@ class ADSBattacks(core.Entity):
     @attack.subcommand(name="NONE", brief="NONE acid")
     def attack_none(self, acid: "acid"):  # type: ignore
         """Clear any attack for a given aircraft."""
+
+        if traf.ADSBattack[acid] == "GHOST":
+            return False, f"Cannot clear GHOST aircraft. Use ATTACK DELGHOST instead."
+
         traf.ADSBattack[acid] = "NONE"
         traf.ADSBattack_arg[acid] = {}
 
-        return True, f"{traf.id[acid]} is under NONE attack."
+        return True, f"{traf.id[acid]} is not under attack."
 
     @attack.subcommand(name="STATUS", brief="STATUS acid")
     def attack_status(self, acid: "acid"):  # type: ignore
         """Show current attack status for a given aircraft."""
+
         return (
             True,
             f"Aircraft {traf.id[acid]} is currently under {traf.ADSBattack[acid]} attack.",

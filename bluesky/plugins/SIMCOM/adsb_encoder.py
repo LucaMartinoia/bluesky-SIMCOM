@@ -5,6 +5,10 @@ from math import floor, cos, pi, acos, sqrt
 import numpy as np
 from bluesky.tools.aero import kts, ft, a0
 
+"""This module defines functions to encode ADS-B messages given the raw data.
+
+It can encode position, identification and airborne velocity messages."""
+
 
 # --------------------------------------------------------------------
 # --------------------------------------------------------------------
@@ -110,11 +114,10 @@ def crc(msg: str, encode: bool = False) -> int:
 
 
 def identification(ca: int, icao: str, tc: int, ec: int, callsign: str) -> str:
-    """
-    Encode ADS-B aircraft identification message.
+    """Encode ADS-B identification message.
 
-    capability field, icao address, type code, emitter category, callsign.
-    """
+    capability field, icao address, type code, emitter category, callsign."""
+
     # Validate ICAO
     if len(icao) != 6:
         raise ValueError("ICAO must be 6 hex digits")
@@ -183,17 +186,14 @@ def position(
     lon: float,
 ) -> str:
     # Only TC = 9 fully implemented
-    """
-    Encode ADS-B aircraft position message.
+    """Encode ADS-B position message.
 
     capability field, icao address, type code, surveillance status,
-    antenna flag/NAC, altitude, time sync flag, parity, latitude, longitude.
-    """
+    antenna flag/NAC, altitude, time-sync flag, parity, latitude, longitude."""
 
     def compute_NL(lat: float) -> int:
-        """
-        Compute NL (longitude zone number) function.
-        """
+        """Compute NL (longitude zone number) function."""
+
         NZ = 15  # Number of latitude zones N_z
         if abs(lat) < 10**-6:  # When near the equator, NL is fixed
             return 59
@@ -208,9 +208,8 @@ def position(
             return int(floor(nl))
 
     def cpr_encode(lat: float, lon: float, even: bool):
-        """
-        Encode latitude and longitude using CPR.
-        """
+        """Encode latitude and longitude using CPR."""
+
         NZ = 15  # Number of latitude zones N_z
         NL = compute_NL(lat)  # Number of longitude zones NL
 
@@ -236,17 +235,14 @@ def position(
         return lat_cpr, lon_cpr
 
     def altitude_code_GNSS(alt: float) -> str:
-        """
-        Encode altitude in 12-bit. With GNSS altitude, thus it is just the
+        """Encode altitude in 12-bit. With GNSS altitude, thus it is just the
         altitude in meters converted to binary, which however set the maximum
-        altitude encodable at about 4000m.
-        """
+        altitude encodable at about 4000m."""
+
         return int2bin(int(round(alt)), 12)
 
     def int_to_gray(n: int) -> int:
-        """
-        Convert an integer to Gray code.
-        """
+        """Convert an integer to Gray code."""
         return n ^ (n >> 1)
 
     def altitude_q0(alt_ft: int) -> str:
@@ -275,10 +271,8 @@ def position(
         return "".join(bitstring)
 
     def altitude_code_barometric(alt: float) -> str:
-        """
-        Encode barometric altitude into a 12-bit
-        string according to ADS-B standard.
-        """
+        """Encode barometric altitude into a 12-bit
+        string according to ADS-B standard."""
         # Convert to feet and round
         alt_ft = int(round(alt / ft))
 
@@ -349,9 +343,10 @@ def velocity(
     baro_alt: float,
 ) -> str:
     # subTC 3 and 4 are not implemented
-    """
-    Encode ADS-B aircraft velocity message.
-    """
+    """Encode ADS-B aircraft velocity message.
+
+    capability, icao, intent change flag, NACv, ground speed north, ground speed east,
+    vertical speed source, vertical speed, GNSS altitude, barometric altitude"""
 
     def encode_vertical_rate(s_vert):
         # Convert from m/s to ft/min
