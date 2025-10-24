@@ -37,14 +37,14 @@ def init_plugin():
     # Configuration parameters
     config = {
         # The name of your plugin
-        "plugin_name": "ADSBGUI",
+        "plugin_name": "ADSBGUI2",
         # The type of this plugin.
         "plugin_type": "gui",
     }
     # Start the new visual object
     stack.stack("LABEL 0")  # Hide the standard traffic labels
     addvisual("ADSBRADAR")
-    # stack.stack("CDMETHOD ADSBCD")
+    stack.stack("CDMETHOD ADSBCD")
 
     print("SIMCOM: All ADS-B plugins loaded!")
 

@@ -1,20 +1,30 @@
 import numpy as np
 from bluesky import core, stack, traf  # , settings, navdb, sim, scr, tools
 from bluesky.network.publisher import state_publisher
-from bluesky.plugins.SIMCOM import adsb_encoder as encoder
+from bluesky.plugins.SIMCOM.v4.adsb_encoder import (
+    ADSB_identification,
+    ADSB_position,
+    ADSB_velocity,
+)
+from bluesky.plugins.SIMCOM.v4.adsb_attacks import ADSBattacks
+import csv
+from datetime import datetime
+from types import SimpleNamespace
 
-"""SIMCOM plugin that implements the ADS-B protocol.
+"""SIMCOM plugin that implements the ADS-B protocol."""
 
-No idea why this implementation works, with @timed_function both in protocol.py and attacks.py, but it does.
-"""
+"""TO DO:
+1. Finish ADSBLOG functions
+2. Fix ADSBGUI, redoing the surveillance status flashes
+3. Add the line joining true and ADS-B AC in ADSBGUI
+4. Write the conflict detection module and integrate it within ADSBGUI"""
 
-# Type Codes for ADS-B messages.
-# identification: 4. Identification is 1-4.
-# position: 9. Airborne position is 9-18 (baro alt) or 20-22 (GNSS alt)
-# velocity: 19, fixed.
-TYPE_CODES = dict(identification=4, position=9, velocity=19)
+TYPE_CODES = dict(
+    identification=4, position=9, velocity=19
+)  # Type Codes for ADS-B messages.
 ACUPDATE_RATE = 5  # Update rate of aircraft update messages [Hz]
 ADSB_UPDATE = 0.5  # Update dt for ADS-B messages [s]
+LOG_UPDATE = 1
 
 
 def init_plugin():
@@ -30,7 +40,7 @@ def init_plugin():
         "plugin_name": "ADSBPROTOCOL",
         "plugin_type": "sim",
         # The update function is called after traffic is updated.
-        # "update": adsbprotocol.update,
+        "update": adsbprotocol.update,
         # Reset contest
         "reset": adsbprotocol.reset,
     }
@@ -41,123 +51,115 @@ def init_plugin():
 # Need some way to still identify AC uniquely:
 # the ACID still remains the main identifier.
 class ADSBprotocol(core.Entity):
+    """Main SIMCOM class. It defines the ADS-B attributes and methods."""
 
     def __init__(self):
+        """Initialize the ADSB protocol class."""
+
         super().__init__()
+        self.attacks = ADSBattacks()
+        self.log = SimpleNamespace(flag=False)
+
+        # Need to call self.cd.update() inside the update function!
+        # self.cd = ConflictDetection()
+        # self.cr = ConflictResolution()
 
         # All classes deriving from Entity can register lists and numpy arrays
         # that hold per-aircraft data. This way, their size is automatically
         # updated when aircraft are created or deleted in the simulation.
-        with traf.settrafarrays():
-            traf.ADSBattack = np.array([], dtype="<U16")
-            traf.ADSBicao = np.array([], dtype="U6")
-            traf.ADSBcallsign = []  # identifier (string)
-            traf.ADSBaltGNSS = np.array([], dtype=float)
-            traf.ADSBaltBaro = np.array([], dtype=float)
-            traf.ADSBlat = np.array([])  # latitude [deg]
-            traf.ADSBlon = np.array([])  # longitude [deg]
-            traf.ADSBtas = np.array([])  # true airspeed [m/s]
-            traf.ADSBgsnorth = np.array([])  # ground speed [m/s]
-            traf.ADSBgseast = np.array([])  # ground speed [m/s]
-            traf.ADSBvs = np.array([])  # vertical speed [m/s]
-            traf.ADSBhdg = np.array([])  # traffic heading [deg]
-            traf.ADSBtrk = np.array([])  # track angle [deg]
-            # Capability field
-            traf.ADSBcapability = np.array([], dtype=int)
-            traf.ADSBemitter_category = np.array([], dtype=int)
-            traf.ADSBtime_bit = np.array([], dtype=int)  # Time bit
-            # ALERT status (0: no alert)
-            traf.ADSBsurveillance_status = np.array([], dtype=int)
-            traf.ADSBantenna_flag = np.array([], dtype=int)
-            traf.ADSBintent_change = np.array([], dtype=int)  # IC flag
-            traf.ADSBNACv = np.array([], dtype=int)
+        with self.settrafarrays():
+            self.icao = np.array([], dtype="U6")
+            self.callsign = []  # identifier (string)
+            self.altGNSS = np.array([], dtype=float)  # [m]
+            self.altbaro = np.array([], dtype=float)  # [m]
+            self.lat = np.array([])  # latitude [deg]
+            self.lon = np.array([])  # longitude [deg]
+            self.gsnorth = np.array([])  # ground speed [m/s]
+            self.gseast = np.array([])  # ground speed [m/s]
+            self.gs = np.array([])  # ground speed [m/s]
+            self.vs = np.array([])  # vertical speed [m/s]
+            self.trk = np.array([])  # track angle [deg]
+            self.capability = np.array([], dtype=int)  # CA field
+            self.ss = np.array([], dtype=int)  # surveillance status (0: no alert)
+
             # ADS-B messages
-            traf.ADSBmsg_pos_o = np.array([], dtype="<U28")
-            traf.ADSBmsg_pos_e = np.array([], dtype="<U28")
-            traf.ADSBmsg_id = np.array([], dtype="<U28")
-            traf.ADSBmsg_v = np.array([], dtype="<U28")
+            self.msg_pos_o = np.array([], dtype="<U28")
+            self.msg_pos_e = np.array([], dtype="<U28")
+            self.msg_id = np.array([], dtype="<U28")
+            self.msg_v = np.array([], dtype="<U28")
 
     def create(self, n=1):
         """This function gets called automatically
         when new aircraft are created."""
 
         super().create(n)
-
-        # Initialize the attack flags
-        traf.ADSBattack[-n:] = ["NONE"] * n
+        # The children self.attacks is created automatically
 
         # Inizialize the ICAO addresses and call sign
         icaos = np.array(
             [f"{x:06X}" for x in np.random.randint(0, 0xFFFFFF + 1, size=n)]
         )
-        traf.ADSBicao[-n:] = icaos
-        traf.ADSBcallsign[-n:] = traf.id[-n:]
+        self.icao[-n:] = icaos
+        self.callsign[-n:] = traf.id[-n:]
 
-        # Initialize altitudes to match real ones on aircraft creation
+        # Initialize flight data
         noise = np.random.uniform(-150, 150, size=n)
-        traf.ADSBaltGNSS[-n:] = np.maximum(traf.alt[-n:] + noise, 0)
-        traf.ADSBaltBaro[-n:] = traf.alt[-n:]
+        self.altGNSS[-n:] = np.maximum(traf.alt[-n:] + noise, 0)
+        self.altbaro[-n:] = traf.alt[-n:]
+        self.lat[-n:] = traf.lat[-n:]
+        self.lon[-n:] = traf.lon[-n:]
+        self.gsnorth[-n:] = traf.gsnorth[-n:]
+        self.gseast[-n:] = traf.gseast[-n:]
+        self.gs[-n:] = traf.gs[-n:]
+        self.vs[-n:] = traf.vs[-n:]
+        self.trk[-n:] = traf.trk[-n:]
 
-        # Inizialize the position and velocity
-        traf.ADSBlat[-n:] = traf.lat[-n:]
-        traf.ADSBlon[-n:] = traf.lon[-n:]
-        traf.ADSBtas[-n:] = traf.tas[-n:]
-        traf.ADSBgsnorth[-n:] = traf.gsnorth[-n:]
-        traf.ADSBgseast[-n:] = traf.gseast[-n:]
-        traf.ADSBvs[-n:] = traf.vs[-n:]
-        traf.ADSBhdg[-n:] = traf.hdg[-n:]
-        traf.ADSBtrk[-n:] = traf.trk[-n:]
-
-        # Capability (CA) field, Emitter category, time bit
-        # CA = 5 means 'Aircraft with level 2 transponder, airborne'.
-        traf.ADSBcapability[-n:] = 5
-        # TODO: check if this data exists in OpenAP or legacy source
-        traf.ADSBemitter_category[-n:] = 3
-        traf.ADSBtime_bit[-n:] = 0
-        traf.ADSBsurveillance_status[-n:] = 0
-        traf.ADSBantenna_flag[-n:] = 1
-        traf.ADSBintent_change[-n:] = 0
-        traf.ADSBNACv[-n:] = 2
+        # CA = 5, 'aircraft with level 2 transponder, airborne'.
+        self.capability[-n:] = 5
+        self.ss[-n:] = 0
 
         # Initialize ADS-B messages
         for j in range(-n, 0):
-            traf.ADSBmsg_pos_o[j] = ADSB_position(traf.id[j], False)
-            traf.ADSBmsg_pos_e[j] = ADSB_position(traf.id[j], True)
-            traf.ADSBmsg_id[j] = ADSB_identification(traf.id[j])
-            traf.ADSBmsg_v[j] = ADSB_velocity(traf.id[j])
+            self.msg_pos_o[j] = ADSB_position(self, j, False)
+            self.msg_pos_e[j] = ADSB_position(self, j, True)
+            self.msg_id[j] = ADSB_identification(self, j)
+            self.msg_v[j] = ADSB_velocity(self, j)
 
     @core.timed_function(
         dt=ADSB_UPDATE, hook="update"
     )  # runs every 0.5 simulated seconds
     def ADSBupdate(self):
-        """the ADS-B data are updated based on the actual aircraft data, except for
+        """The ADS-B data are updated based on the actual AC data, except for
         GHOST aircraft."""
 
         n = traf.ntraf
+
         # GHOST aircraft do not have real data to update ADS-B fields
-        mask = traf.ADSBattack != "GHOST"
+        mask = self.attacks.type != "GHOST"
+        # Initialize GHOST aircraft
+        self.attacks.init_ghosts(self)
+
         indices = np.where(mask)[0]
 
-        traf.ADSBaltBaro[mask] = traf.alt[:n]
-        traf.ADSBlat[mask] = traf.lat[:n]
-        traf.ADSBlon[mask] = traf.lon[:n]
-        traf.ADSBtas[:n] = traf.tas[:n]
-
+        # Aircraft update their ADS-B value from their actual values
+        self.lat[mask] = traf.lat[:n]
+        self.lon[mask] = traf.lon[:n]
         noise = np.random.uniform(-150, 150, size=n)
-        traf.ADSBaltGNSS[mask] = np.maximum(traf.alt[:n] + noise, 0)
-
-        traf.ADSBgsnorth[mask] = traf.gsnorth[:n]
-        traf.ADSBgseast[mask] = traf.gseast[:n]
-        traf.ADSBvs[mask] = traf.vs[:n]
-        traf.ADSBhdg[mask] = traf.hdg[:n]
-        traf.ADSBtrk[:n] = traf.trk[:n]
+        self.altbaro[mask] = traf.alt[:n]
+        self.altGNSS[mask] = np.maximum(traf.alt[:n] + noise, 0)
+        self.gsnorth[mask] = traf.gsnorth[:n]
+        self.gseast[mask] = traf.gseast[:n]
+        self.vs[mask] = traf.vs[:n]
 
         # Compute ADS-B messages for all aircraft
         for i in indices:
-            traf.ADSBmsg_pos_o[i] = ADSB_position(traf.id[i], False)
-            traf.ADSBmsg_pos_e[i] = ADSB_position(traf.id[i], True)
-            traf.ADSBmsg_id[i] = ADSB_identification(traf.id[i])
-            traf.ADSBmsg_v[i] = ADSB_velocity(traf.id[i])
+            self.msg_pos_o[i] = ADSB_position(self, i, False)
+            self.msg_pos_e[i] = ADSB_position(self, i, True)
+            self.msg_id[i] = ADSB_identification(self, i)
+            self.msg_v[i] = ADSB_velocity(self, i)
+
+        # Man in the middle attacks
+        self.attacks.man_in_the_middle(self)
 
     def reset(self):
         """Clear all traffic data upon simulation reset."""
@@ -168,8 +170,16 @@ class ADSBprotocol(core.Entity):
         # are all reset as well, so all lat,lon,sdp etc but also objects adsb
         super().reset()
 
+    def update(self):
+        """Update functions is called every sim.dt step."""
+
+        # Initialize GHOST aircraft
+        self.attacks.init_ghosts(self)
+        # Update their position
+        self.attacks.update_ghost_pos(self)
+
     # --------------------------------------------------------------------
-    #                      PUBLISHER AND UTILS
+    #                      PUBLISHER
     # --------------------------------------------------------------------
 
     @state_publisher(topic="ADSBDATA", dt=1000 // ACUPDATE_RATE)
@@ -177,18 +187,18 @@ class ADSBprotocol(core.Entity):
         """Broadcast ADS-B data to the GPU for displaying.
         The update rate is higher than in real world, so it includes dead reckoning.
 
-        The id is to keep track of AC, the status is not necessary in theory
-        (contained in velocity messages), but in practice pyModeS has no way
-        to extract the status field from ADS-B messages."""
+        The id is to keep track of AC. The status is not necessary in theory
+        (is in velocity messages), but pyModeS cannot extract the field from ADS-B messages.
+        """
 
         data = dict()
 
         data["id"] = traf.id
-        data["status"] = traf.ADSBsurveillance_status
-        data["ADSBmsg_pos_o"] = traf.ADSBmsg_pos_o
-        data["ADSBmsg_pos_e"] = traf.ADSBmsg_pos_e
-        data["ADSBmsg_id"] = traf.ADSBmsg_id
-        data["ADSBmsg_v"] = traf.ADSBmsg_v
+        data["status"] = self.ss
+        data["ADSBmsg_pos_o"] = self.msg_pos_o
+        data["ADSBmsg_pos_e"] = self.msg_pos_e
+        data["ADSBmsg_id"] = self.msg_id
+        data["ADSBmsg_v"] = self.msg_v
 
         return data
 
@@ -196,121 +206,52 @@ class ADSBprotocol(core.Entity):
     #                      STACK COMMANDS
     # --------------------------------------------------------------------
 
-    @stack.command(name="STATUS", brief="STATUS acid,[status (0, 1, 2)]")
-    def squawk(self, acid: "acid", status: str = ""):  # type: ignore
+    @stack.command(name="SSTATUS", brief="SSTATUS acid,[status (0, 1, 2)]")
+    def status(self, acid: "acid", status: str = ""):  # type: ignore
         """Set the surveillance status of a given aircraft.
         If the status is not given, it returns the status of the aircraft."""
 
         if status == "":
             return (
                 True,
-                f"Aircraft {traf.id[acid]} surveillance status is {traf.ADSBsurveillance_status[acid]}.",
+                f"Aircraft {traf.id[acid]} surveillance status is {self.ss[acid]}.",
             )
 
-        traf.ADSBsurveillance_status[acid] = int(status)
+        self.ss[acid] = int(status)
 
         return True, f"The surveillance status for {traf.id[acid]} is set to {status}."
 
+    @stack.command(name="ADSBLOG", brief="ADSBLOG fname")
+    def data_logger(self, fname: str = "SIMCOM"):
+        """Create the CSV file for the logging."""
 
-# --------------------------------------------------------------------
-#                      ADS-B WRAPPER FUNCTIONS
-# --------------------------------------------------------------------
+        # If the flag is False, create file and enable logging
+        if not self.log.flag:
+            timestamp = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
+            fname = f"{fname}_{timestamp}.csv"
+            self.log.fname = f"output/{fname}"
 
+            with open(fname, mode="w", newline="") as f:
+                writer = csv.writer(f)
+                # Write header only once
+                writer.writerow(["id", "lat"])
 
-def ADSB_identification(acid: "acid"):  # type: ignore
-    """Encode identification ADS-B message for given aircraft index."""
+            # Enable logging
+            self.log.flag = True
+            stack.stack(f"ECHO Saving data in {fname}...")
+        else:
+            # If the flag is True, stop logging
+            self.log.flag = False
+            self.log.fname = ""
+            stack.stack("ECHO Data logging has stopped.")
 
-    index = id2idx(acid)
+    @core.timed_function(dt=LOG_UPDATE)
+    def log_data(self):
 
-    capability = traf.ADSBcapability[index]
-    icao = traf.ADSBicao[index]
-    emitter_category = traf.ADSBemitter_category[index]
-    callsign = traf.ADSBcallsign[index][:8].upper().ljust(8)
-    if len(traf.ADSBcallsign[index]) > 8:
-        stack.stack(
-            f"ECHO WARNING: Callsign {traf.ADSBcallsign[index]} too long,truncating to 8 characters"
-        )
-
-    # Encode and return hex string
-    return encoder.identification(
-        capability, icao, TYPE_CODES["identification"], emitter_category, callsign
-    )
-
-
-def ADSB_position(acid: "acid", even: bool):  # type: ignore
-    """Encode position ADS-B message for given aircraft index."""
-
-    index = id2idx(acid)
-
-    capability = traf.ADSBcapability[index]
-    icao = traf.ADSBicao[index]
-    surveillance_status = traf.ADSBsurveillance_status[index]
-    antenna_flag = traf.ADSBantenna_flag[index]
-    alt = traf.ADSBaltBaro[index]
-    time_bit = traf.ADSBtime_bit[index]
-    lat = traf.ADSBlat[index]
-    lon = traf.ADSBlon[index]
-
-    # Encode and return hex string
-    return encoder.position(
-        capability,
-        icao,
-        TYPE_CODES["position"],
-        surveillance_status,
-        antenna_flag,
-        alt,
-        time_bit,
-        even,
-        lat,
-        lon,
-    )
-
-
-def ADSB_velocity(acid: "acid"):  # type: ignore
-    """Encode velocity ADS-B message for given aircraft index."""
-
-    index = id2idx(acid)
-
-    capability = traf.ADSBcapability[index]
-    icao = traf.ADSBicao[index]
-    ic_flag = traf.ADSBintent_change[index]
-    NACv = traf.ADSBNACv[index]
-    gs_north = traf.ADSBgsnorth[index]
-    gs_east = traf.ADSBgseast[index]
-    vert_src = 1
-    s_vert = traf.ADSBvs[index]
-    GNSS_alt = traf.ADSBaltGNSS[index]
-    baro_alt = traf.ADSBaltBaro[index]
-
-    # Encode and return hex string
-    return encoder.velocity(
-        capability,
-        icao,
-        ic_flag,
-        NACv,
-        gs_north,
-        gs_east,
-        vert_src,
-        s_vert,
-        GNSS_alt,
-        baro_alt,
-    )
-
-
-def id2idx(acid):
-    """Find index of aircraft id."""
-
-    if not isinstance(acid, str):
-        # id2idx is called for multiple id's
-        # Fast way of finding indices of all ACID's in a given list
-        tmp = dict((v, i) for i, v in enumerate(traf.id))
-        # return [tmp.get(acidi, -1) for acidi in acid]
-    else:
-        # Catch last created id (* or # symbol)
-        if acid in ("#", "*"):
-            return traf.ntraf - 1
-
-        try:
-            return traf.id.index(acid.upper())
-        except:
-            return -1
+        # If logging is enabled, save a new row every dt seconds
+        if self.log.flag:
+            with open(self.log.fname, mode="a", newline="") as f:
+                writer = csv.writer(f)
+                writer.writerow([traf.id, self.lat])
+        else:
+            return

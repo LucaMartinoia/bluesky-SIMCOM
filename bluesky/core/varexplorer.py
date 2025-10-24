@@ -1,7 +1,8 @@
-''' BlueSky variable explorer
+"""BlueSky variable explorer
 
-    Provide flexible access to simulation data in BlueSky.
-'''
+Provide flexible access to simulation data in BlueSky.
+"""
+
 from numbers import Number
 from collections import OrderedDict
 from collections.abc import Collection
@@ -17,11 +18,15 @@ varlist = OrderedDict()
 
 
 def init():
-    ''' Variable explorer initialization function.
-        Is called in bluesky.init() '''
+    """Variable explorer initialization function.
+    Is called in bluesky.init()"""
     # Add the default sources to the variable explorer
-    varlist.update([('sim', (bs.sim, getvarsfromobj(bs.sim))),
-                    ('traf', (bs.traf, getvarsfromobj(bs.traf)))])
+    varlist.update(
+        [
+            ("sim", (bs.sim, getvarsfromobj(bs.sim))),
+            ("traf", (bs.traf, getvarsfromobj(bs.traf))),
+        ]
+    )
 
 
 def register_data_parent(obj, name):
@@ -29,22 +34,21 @@ def register_data_parent(obj, name):
 
 
 def getvarsfromobj(obj):
-    ''' Return a list with the names of the variables of the passed object.'''
+    """Return a list with the names of the variables of the passed object."""
     try:
         # Return attribute names, but exclude private attributes
-        return [name for name in vars(obj) if not name[0] == '_']
+        return [name for name in vars(obj) if not name[0] == "_"]
     except TypeError:
         return None
 
 
-def lsvar(varname=''):
-    ''' Stack function to list information on simulation variables in the
-        BlueSky console. '''
+def lsvar(varname=""):
+    """Stack function to list information on simulation variables in the
+    BlueSky console."""
     if not varname:
         # When no argument is passed, show a list of parent objects for which
         # variables can be accessed
-        return True, '\n' + \
-            str.join(', ', [key for key in varlist])
+        return True, "\n" + str.join(", ", [key for key in varlist])
 
     # Find the variable in the variable list
     v = findvar(varname)
@@ -54,29 +58,27 @@ def lsvar(varname=''):
         attrs = getvarsfromobj(thevar)
         vartype = v.get_type()  # Type of the variable
         if isinstance(v.parent, TrafficArrays) and v.parent.istrafarray(v.varname):
-            vartype += ' (TrafficArray)'
-        txt = \
-            f'Variable:   {v.varname}\n' + \
-            f'Type:       {vartype}\n'
+            vartype += " (TrafficArray)"
+        txt = f"Variable:   {v.varname}\n" + f"Type:       {vartype}\n"
         if isinstance(thevar, Collection):
-            txt += f'Size:       {len(thevar)}\n'
-        txt += f'Parent:     {v.parentname}'
+            txt += f"Size:       {len(thevar)}\n"
+        txt += f"Parent:     {v.parentname}"
         if attrs:
-            txt += '\nAttributes: ' + str.join(', ', attrs) + '\n'
-        return True, '\n' + txt
-    return False, f'Variable {varname} not found'
+            txt += "\nAttributes: " + str.join(", ", attrs) + "\n"
+        return True, "\n" + txt
+    return False, f"Variable {varname} not found"
 
 
 def findvar(varname):
-    ''' Find a variable and its parent object in the registered varlist set, based
-        on varname, as passed by the stack.
-        Variables can be searched in two ways:
-        By name only: e.g., varname lat returns (traf, lat)
-        By object: e.g., varname traf.lat returns (traf, lat)
-        '''
+    """Find a variable and its parent object in the registered varlist set, based
+    on varname, as passed by the stack.
+    Variables can be searched in two ways:
+    By name only: e.g., varname lat returns (traf, lat)
+    By object: e.g., varname traf.lat returns (traf, lat)
+    """
     try:
         # Find a string matching 'a.b.c[d]', where everything except a is optional
-        varset = re.findall(r'(\w+)(?<=.)*(?:\[(\w+)\])?', varname)
+        varset = re.findall(r"(\w+)(?<=.)*(?:\[(\w+)\])?", varname)
         # The actual variable is always the last
         name, index = varset[-1]
         # is a parent object passed? (e.g., traf.lat instead of just lat)
@@ -111,8 +113,8 @@ def findvar(varname):
 
 
 class Variable:
-    ''' Wrapper class for variable explorer.
-        Keeps reference to parent object, parent name, and variable name. '''
+    """Wrapper class for variable explorer.
+    Keeps reference to parent object, parent name, and variable name."""
 
     def __init__(self, parent, parentname, varname, index):
         self.parent = parent
@@ -124,19 +126,24 @@ class Variable:
             self.index = []
 
     def is_num(self):
-        ''' py3 replacement of operator.isNumberType.'''
+        """py3 replacement of operator.isNumberType."""
         v = getattr(self.parent, self.varname)
-        return isinstance(v, Number) or \
-            (isinstance(v, np.ndarray) and v.dtype.kind not in 'OSUV') or \
-            (isinstance(v, Collection) and self.index and
-             all([isinstance(v[i], Number) for i in self.index]))
+        return (
+            isinstance(v, Number)
+            or (isinstance(v, np.ndarray) and v.dtype.kind not in "OSUV")
+            or (
+                isinstance(v, Collection)
+                and self.index
+                and all([isinstance(v[i], Number) for i in self.index])
+            )
+        )
 
     def get_type(self):
-        ''' Return the a string containing the type name of this variable. '''
+        """Return the a string containing the type name of this variable."""
         return self.get().__class__.__name__
 
     def get(self):
-        ''' Get a reference to the actual variable. '''
+        """Get a reference to the actual variable."""
         if self.index:
             v = getattr(self.parent, self.varname)
             return [v[i] for i in self.index]
