@@ -1,10 +1,17 @@
 import numpy as np
-from bluesky import core, stack, traf, ref, sim  # , settings, navdb, sim, scr, tools
+from bluesky import (
+    core,
+    stack,
+    traf,
+    ref,
+    sim,
+    settings,
+)  # , settings, navdb, sim, scr, tools
 import pyModeS as pms
 from bluesky.tools.aero import ft, Rearth, kts, nm
 from random import randint
 from bluesky.tools.misc import txt2alt
-from bluesky.plugins.SIMCOM.v4.adsb_encoder import (
+from bluesky.plugins.SIMCOM.adsb_encoder import (
     ADSB_identification,
     ADSB_position,
     ADSB_velocity,
@@ -22,19 +29,23 @@ class ADSBattacks(core.Entity):
 
         super().__init__()
 
-        self.attack_str = "FREEZE, HIDE, JUMP, MGHOST, GHOST, NONE, STATUS"
+        # List of implemented functions/attacks
+        self.attack_str = "FREEZE, HIDE, JUMP, MGHOST, GHOST, NONE, STATUS, OFF"
 
         # Create arrays for the attack arguments and attack type
         with self.settrafarrays():
-            self.arg = []
-            self.type = np.array([], dtype="<U20")
+            self.arg = []  # Attack arguments
+            self.type = np.array([], dtype="<U20")  # Attack type
 
     def create(self, n=1):
         """When new aircraft are created, they are appended with a new field that stores
         the cyber-attack parameters."""
 
-        self.arg = [{} for _ in range(n)]
-        self.type = np.append(self.type, ["NONE"] * n)
+        super().create(n)
+
+        # Empty arguments and NONE attack for newly created aircraft
+        self.arg[-n:] = ({} for _ in range(n))
+        self.type[-n:] = ["NONE"] * n
 
     # --------------------------------------------------------------------
     #                      ATTACKS
@@ -92,7 +103,7 @@ class ADSBattacks(core.Entity):
                 0,
                 1,
             )
-            alt = pms.adsb.altitude(str(adsb.msg_pos_e[i])) * ft
+            alt = pms.adsb.altitude(str(adsb.msg_pos_e[i])) * ft  # To meters
 
             adsb.lat[i] = lat + self.arg[i]["lat"]
             adsb.lon[i] = lon + self.arg[i]["lon"]
@@ -142,7 +153,11 @@ class ADSBattacks(core.Entity):
         """Inizializes GHOST aircraft."""
 
         # Append GHOST values to the ADS-B data
-        traf.id.append(self.arg[i]["id"])
+        if self.arg[i]["id"] not in traf.id:
+            traf.id.append(self.arg[i]["id"])
+        else:
+            idtmp = chr(randint(65, 90)) + chr(randint(65, 90)) + "{:>05}"
+            traf.id.append(idtmp.format(0))
         adsb.icao = np.append(adsb.icao, self.arg[i]["icao"])
         adsb.callsign.append(self.arg[i]["callsign"])
 
@@ -151,8 +166,8 @@ class ADSBattacks(core.Entity):
         adsb.lat = np.append(adsb.lat, self.arg[i]["lat"])
         adsb.lon = np.append(adsb.lon, self.arg[i]["lon"])
         rads = np.deg2rad(self.arg[i]["trk"])
-        gsnorth = self.arg[i]["gs"] * np.sin(rads)
-        gseast = self.arg[i]["gs"] * np.cos(rads)
+        gsnorth = self.arg[i]["gs"] * np.cos(rads)
+        gseast = self.arg[i]["gs"] * np.sin(rads)
         adsb.gsnorth = np.append(adsb.gsnorth, gsnorth)
         adsb.gseast = np.append(adsb.gseast, gseast)
         adsb.vs = np.append(adsb.vs, 0)
@@ -161,6 +176,11 @@ class ADSBattacks(core.Entity):
 
         adsb.capability = np.append(adsb.capability, 5)
         adsb.ss = np.append(adsb.ss, 0)
+
+        # Conflict detection variables
+        adsb.cd.rpz = np.append(adsb.cd.rpz, settings.asas_pzr * nm)
+        adsb.cd.hpz = np.append(adsb.cd.hpz, settings.asas_pzh * ft)
+        adsb.cd.dtlookahead = np.append(adsb.cd.dtlookahead, settings.asas_dtlookahead)
 
         # Compute initial ADSB messages
         adsb.msg_pos_o = np.append(adsb.msg_pos_o, ADSB_position(adsb, i, False))
@@ -188,6 +208,10 @@ class ADSBattacks(core.Entity):
 
         adsb.capability = np.delete(adsb.capability, i)
         adsb.ss = np.delete(adsb.ss, i)
+
+        adsb.cd.rpz = np.delete(adsb.cd.rpz, i)
+        adsb.cd.hpz = np.delete(adsb.cd.hpz, i)
+        adsb.cd.dtlookahead = np.delete(adsb.cd.dtlookahead, i)
 
         adsb.msg_pos_o = np.delete(adsb.msg_pos_o, i)
         adsb.msg_pos_e = np.delete(adsb.msg_pos_e, i)
@@ -259,8 +283,6 @@ class ADSBattacks(core.Entity):
     ):
         """Creates a GHOST aircraft."""
 
-        ######## MIGHT BE NECESSARY TO ALSO ADD data.inconf, data.tcpamax TO AVOID CONFLICT DETECTION CRASHES
-
         self.type = np.append(self.type, "GHOST")
         self.arg.append({})
 
@@ -298,20 +320,25 @@ class ADSBattacks(core.Entity):
         return True, f"{num} GHOST aircraft created."
 
     @stack.command(name="DELGHOST", brief="DELGHOST [acid]")
-    def remove_ghost_aircraft(self, acid: str = ""):  # type: ignore
+    def remove_ghost(self, acid: str = ""):  # type: ignore
         """Remove selected aircraft. If no ACID is provided, remove ALL ghost aircraft instead."""
 
         if acid != "":
             i = id2idx(acid)
-            self.arg[i]["init"] = 2
-            print(acid, i, self.arg[i])
+            if i == -1:
+                return False, "Aircraft does not exists."
+            elif self.type[i] != "GHOST":
+                return False, f"{acid} is not a GHOST aircraft"
+            else:
+                self.arg[i]["init"] = 2
+                return True, f"GHOST aircraft {acid} deleted."
         else:
-            # Boolean mask: True for aircraft to keep
             mask = self.type == "GHOST"
             indices = np.where(mask)[0]
 
             for i in indices:
                 self.arg[i]["init"] = 2
+            return True
 
     @attack.subcommand(name="NONE", brief="NONE acid")
     def attack_none(self, acid: "acid"):  # type: ignore
@@ -335,4 +362,19 @@ class ADSBattacks(core.Entity):
         return (
             True,
             f"Aircraft {traf.id[acid]} is currently under {self.type[acid]} attack.",
+        )
+
+    @attack.subcommand(name="OFF")
+    def attack_off(self):  # type: ignore
+        """Remove all attacks."""
+
+        self.remove_ghost()
+
+        for attack, id in zip(self.type, traf.id):
+            if attack != "GHOST":
+                self.attack_none(id)
+
+        return (
+            True,
+            f"All aircraft returned to NONE status.",
         )

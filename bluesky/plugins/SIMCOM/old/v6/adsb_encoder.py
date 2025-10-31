@@ -4,7 +4,6 @@ from textwrap import wrap
 from math import floor, cos, pi, acos, sqrt
 import numpy as np
 from bluesky.tools.aero import kts, ft, a0
-from bluesky import traf
 
 """This module defines functions to encode ADS-B messages given the raw data.
 
@@ -16,7 +15,7 @@ It can encode position, identification and airborne velocity messages."""
 #                           TOOLS
 # --------------------------------------------------------------------
 # --------------------------------------------------------------------
-
+"""
 
 def int2bin(val: int, bits: int) -> str:
     """Convert integer to binary string with
@@ -588,98 +587,6 @@ def _test_velocity():
         f"Vertical rate match:\t{abs(vert_s * 60 / ft - vert_S) < 64}\n"
         f"GNSS-baro alt match:\t{abs(alt_dif_S - alt_dif) < 25}\n"
     )
-
-
-# --------------------------------------------------------------------
-#                      ADS-B WRAPPER FUNCTIONS
-# --------------------------------------------------------------------
-
-TYPE_CODES = dict(identification=4, position=9, velocity=19)
-
-
-def ADSB_identification(traf, index: int):
-    """Encode identification ADS-B message for given aircraft index."""
-
-    capability = traf.capability[index]
-    icao = traf.icao[index]
-    emitter_category = 3
-    callsign = traf.callsign[index][:8].upper().ljust(8)
-
-    # Encode and return hex string
-    return identification(
-        capability, icao, TYPE_CODES["identification"], emitter_category, callsign
-    )
-
-
-def ADSB_position(traf, index: int, even: bool):
-    """Encode position ADS-B message for given aircraft index."""
-
-    capability = traf.capability[index]
-    icao = traf.icao[index]
-    ss = traf.ss[index]
-    alt = traf.altbaro[index]
-    lat = traf.lat[index]
-    lon = traf.lon[index]
-
-    # Encode and return hex string
-    return position(
-        capability,
-        icao,
-        TYPE_CODES["position"],
-        ss,
-        1,
-        alt,
-        0,
-        even,
-        lat,
-        lon,
-    )
-
-
-def ADSB_velocity(traf, index: int):  # type: ignore
-    """Encode velocity ADS-B message for given aircraft index."""
-
-    capability = traf.capability[index]
-    icao = traf.icao[index]
-    gs_north = traf.gsnorth[index]
-    gs_east = traf.gseast[index]
-    vert_src = 1
-    s_vert = traf.vs[index]
-    GNSS_alt = traf.altGNSS[index]
-    baro_alt = traf.altbaro[index]
-
-    # Encode and return hex string
-    return velocity(
-        capability,
-        icao,
-        0,
-        2,
-        gs_north,
-        gs_east,
-        vert_src,
-        s_vert,
-        GNSS_alt,
-        baro_alt,
-    )
-
-
-def id2idx(acid):
-    """Find index of aircraft id."""
-
-    if not isinstance(acid, str):
-        # id2idx is called for multiple id's
-        # Fast way of finding indices of all ACID's in a given list
-        tmp = dict((v, i) for i, v in enumerate(traf.id))
-        # return [tmp.get(acidi, -1) for acidi in acid]
-    else:
-        # Catch last created id (* or # symbol)
-        if acid in ("#", "*"):
-            return traf.ntraf - 1
-
-        try:
-            return traf.id.index(acid.upper())
-        except:
-            return -1
 
 
 if __name__ == "__main__":

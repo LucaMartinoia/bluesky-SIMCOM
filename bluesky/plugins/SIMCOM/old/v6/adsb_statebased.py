@@ -7,7 +7,7 @@ import pyModeS as pms
 
 """State-based conflict detection based on ADS-B data."""
 
-
+"""
 def init_plugin():
     """Plugin initialisation function."""
 

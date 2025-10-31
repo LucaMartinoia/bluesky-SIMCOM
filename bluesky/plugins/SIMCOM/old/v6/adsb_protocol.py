@@ -16,7 +16,7 @@ TYPE_CODES = dict(identification=4, position=9, velocity=19)
 ACUPDATE_RATE = 5  # Update rate of aircraft update messages [Hz]
 ADSB_UPDATE = 0.5  # Update dt for ADS-B messages [s]
 
-
+"""
 def init_plugin():
     """Plugin initialisation function."""
 

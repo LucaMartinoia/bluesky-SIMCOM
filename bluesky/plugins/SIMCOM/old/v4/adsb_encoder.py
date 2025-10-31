@@ -16,25 +16,22 @@ It can encode position, identification and airborne velocity messages."""
 #                           TOOLS
 # --------------------------------------------------------------------
 # --------------------------------------------------------------------
-
+"""
 
 def int2bin(val: int, bits: int) -> str:
     """Convert integer to binary string with
     left-zero padding to 'bits' length."""
-
     return f"{val:0{bits}b}"
 
 
 def int2hex(val: int, digits: int) -> str:
     """Convert integer to hex string with
     left-zero padding to 'digits' length."""
-
     return f"{val:0{digits}X}"
 
 
 def hex2bin(hexstr: str) -> str:
     """Convert a hexadecimal string to binary string, with zero fillings."""
-
     num_of_bits = len(hexstr) * 4
     binstr = bin(int(hexstr, 16))[2:].zfill(int(num_of_bits))
     return binstr
@@ -42,19 +39,16 @@ def hex2bin(hexstr: str) -> str:
 
 def hex2int(hexstr: str) -> int:
     """Convert a hexadecimal string to integer."""
-
     return int(hexstr, 16)
 
 
 def bin2int(binstr: str) -> int:
     """Convert a binary string to integer."""
-
     return int(binstr, 2)
 
 
 def bin2hex(binstr: str) -> str:
     """Convert a binary string to hexadecimal string."""
-
     return "{0:X}".format(int(binstr, 2))
 
 
@@ -71,7 +65,6 @@ def crc(msg: str, encode: bool = False) -> int:
         int: message checksum, or partity bits (encoder)
 
     """
-
     # the CRC generator
     G = [
         int("11111111", 2),
@@ -301,7 +294,7 @@ def position(
     df_bin = int2bin(17, 5)
     ca_bin = int2bin(ca, 3)
 
-    # to binary
+    # ICAO to binary
     icao_bin = hex2bin(icao).zfill(24)
     tc_bin = int2bin(TC, 5)
     ss_bin = int2bin(status, 2)

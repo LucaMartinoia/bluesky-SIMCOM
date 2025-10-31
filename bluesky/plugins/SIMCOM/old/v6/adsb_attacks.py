@@ -21,7 +21,7 @@ from bluesky.plugins.SIMCOM.v4.adsb_protocol import (
 
 """SIMCOM plugin that implements cyber-attacks on the ADS-B protocol."""
 
-
+"""
 def init_plugin():
     """Plugin initialisation function."""
 
