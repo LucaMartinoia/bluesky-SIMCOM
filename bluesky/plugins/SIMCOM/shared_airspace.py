@@ -57,7 +57,11 @@ class SharedAirspace(core.Entity):
         """Assign the role to a given aircraft.
         If no role is provided, it returns the current role."""
 
-        if role == "":
+        # If it's a GHOST, return
+        if self.role[acid] == "":
+            return False, f"GHOST aircraft do not have roles."
+        # If it is not a ghost, getter and setter
+        elif role == "":
             return True, f"{traf.id[acid]} is currently a {self.role[acid]} aircraft."
         elif role == "CIVIL":
             self.role[acid] = role
@@ -67,5 +71,6 @@ class SharedAirspace(core.Entity):
             self.role[acid] = role
             stack.stack(f"ADSBDTLOOK 0 {traf.id[acid]}")
             return True, f"{traf.id[acid]} role set to {role}."
+
         else:
             return False, f"{role} is not a valid role. Must be CIVIL or MILITARY."

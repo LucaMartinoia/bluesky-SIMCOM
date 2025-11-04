@@ -283,7 +283,7 @@ class ADSBprotocol(core.Entity):
 
             # Enable logging
             self.log.flag = True
-            return True, f"ECHO Saving data in {fname}..."
+            return True, f"Saving data in {fname}..."
         else:
             # If the flag is True, stop logging
             self.log.flag = False
@@ -336,7 +336,6 @@ class ADSBprotocol(core.Entity):
         """
 
         # Not in adsb_attacks because it needs access to ADAS-B data.
-
         latref = self.lat[targetidx]  # [deg]
         lonref = self.lon[targetidx]  # [deg]
         altref = self.altbaro[targetidx]  # [m]

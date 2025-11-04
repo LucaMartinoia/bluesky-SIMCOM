@@ -340,7 +340,7 @@ class ADSBRadar(RenderObject, layer=101):
 
                 if self.show_adsb:
                     # If not in conflict and not in danger, standard colors
-                    if sstatus == 0:
+                    if sstatus == 0 or not self.show_danger:
                         rgb = palette.ADSBaircraft
                         # If both ADS-B and true aircraft are shown, reduce ADS-B alpha
                         if self.show_traf:

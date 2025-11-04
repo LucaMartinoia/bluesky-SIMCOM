@@ -160,7 +160,7 @@ class ADSBattacks(core.Entity):
             traf.id.append(idtmp.format(0))
         adsb.icao = np.append(adsb.icao, self.arg[i]["icao"])
         adsb.callsign.append(self.arg[i]["callsign"])
-
+        # Flight data
         adsb.altbaro = np.append(adsb.altbaro, self.arg[i]["alt"])
         adsb.altGNSS = np.append(adsb.altGNSS, self.arg[i]["alt"])
         adsb.lat = np.append(adsb.lat, self.arg[i]["lat"])
@@ -173,15 +173,14 @@ class ADSBattacks(core.Entity):
         adsb.vs = np.append(adsb.vs, 0)
         adsb.gs = np.append(adsb.gs, self.arg[i]["gs"])
         adsb.trk = np.append(adsb.trk, self.arg[i]["trk"])
-
+        # Fixed values
         adsb.capability = np.append(adsb.capability, 5)
         adsb.ss = np.append(adsb.ss, 0)
-
+        adsb.sharedair.role = np.append(adsb.sharedair.role, "")
         # Conflict detection variables
         adsb.cd.rpz = np.append(adsb.cd.rpz, settings.asas_pzr * nm)
         adsb.cd.hpz = np.append(adsb.cd.hpz, settings.asas_pzh * ft)
         adsb.cd.dtlookahead = np.append(adsb.cd.dtlookahead, settings.asas_dtlookahead)
-
         # Compute initial ADSB messages
         adsb.msg_pos_o = np.append(adsb.msg_pos_o, ADSB_position(adsb, i, False))
         adsb.msg_pos_e = np.append(adsb.msg_pos_e, ADSB_position(adsb, i, True))
@@ -195,7 +194,7 @@ class ADSBattacks(core.Entity):
         traf.id.pop(i)
         adsb.callsign.pop(i)
         adsb.icao = np.delete(adsb.icao, i)
-
+        # Flight data
         adsb.altbaro = np.delete(adsb.altbaro, i)
         adsb.altGNSS = np.delete(adsb.altGNSS, i)
         adsb.lat = np.delete(adsb.lat, i)
@@ -205,14 +204,15 @@ class ADSBattacks(core.Entity):
         adsb.vs = np.delete(adsb.vs, i)
         adsb.gs = np.delete(adsb.gs, i)
         adsb.trk = np.delete(adsb.trk, i)
-
+        # FIxed values
         adsb.capability = np.delete(adsb.capability, i)
         adsb.ss = np.delete(adsb.ss, i)
-
+        adsb.sharedair.role = np.delete(adsb.sharedair.role, i)
+        # Conflict Detection data
         adsb.cd.rpz = np.delete(adsb.cd.rpz, i)
         adsb.cd.hpz = np.delete(adsb.cd.hpz, i)
         adsb.cd.dtlookahead = np.delete(adsb.cd.dtlookahead, i)
-
+        # ADS-B messages
         adsb.msg_pos_o = np.delete(adsb.msg_pos_o, i)
         adsb.msg_pos_e = np.delete(adsb.msg_pos_e, i)
         adsb.msg_id = np.delete(adsb.msg_id, i)
@@ -370,9 +370,9 @@ class ADSBattacks(core.Entity):
 
         self.remove_ghost()
 
-        for attack, id in zip(self.type, traf.id):
+        for idx, attack in enumerate(self.type):
             if attack != "GHOST":
-                self.attack_none(id)
+                self.attack_none(idx)
 
         return (
             True,

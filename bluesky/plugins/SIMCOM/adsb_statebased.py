@@ -329,7 +329,7 @@ class ConflictDetection(core.Entity, replaceable=True):
         pass
 
     @stack.command(name="ADSBCD", brief="ADSBCD flag")
-    def setrpz(self, flag: str = None):
+    def cd_selection(self, flag: str = None):
         """Turn ON/OFF the Conflict Detection methods for ADS-B data."""
 
         # Convert string to bool if provided, else keep None
