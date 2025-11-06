@@ -279,10 +279,6 @@ class ADSBRadar(RenderObject, layer=101):
             # ADS-B label, conflict and join line
             rawlabel = ""
             joinlines = np.zeros(4 * self.naircraft, dtype=np.float32)
-            # True aircraft data
-            gt_lat = np.full(len(data.id), np.nan)
-            gt_lon = np.full(len(data.id), np.nan)
-            j = 0
 
             # Adjust the size of saved color arrays
             if len(self.current_color) < len(data.id):
@@ -302,6 +298,8 @@ class ADSBRadar(RenderObject, layer=101):
                 data.tcpamax,
                 lat,
                 lon,
+                self.gt_lat,
+                self.gt_lon,
                 speed,
                 track,
                 data.status,
@@ -314,6 +312,8 @@ class ADSBRadar(RenderObject, layer=101):
                 tcpa,
                 lat0,
                 lon0,
+                gt_lat,
+                gt_lon,
                 gs,
                 trk,
                 sstatus,
@@ -321,12 +321,6 @@ class ADSBRadar(RenderObject, layer=101):
             ) in enumerate(zdata):
                 if i >= MAX_NAIRCRAFT:
                     break
-
-                # Pad the true data for GHOST aircraft
-                if attack != "GHOST":
-                    gt_lat[i] = self.gt_lat[j]
-                    gt_lon[i] = self.gt_lon[j]
-                    j += 1
 
                 # First update the label
                 if self.show_lbl:
@@ -392,8 +386,8 @@ class ADSBRadar(RenderObject, layer=101):
                         joinlines[4 * i : 4 * i + 4] = [
                             lat[i],
                             lon[i],
-                            gt_lat[i],
-                            gt_lon[i],
+                            self.gt_lat[i],
+                            self.gt_lon[i],
                         ]
 
             # Update buffers

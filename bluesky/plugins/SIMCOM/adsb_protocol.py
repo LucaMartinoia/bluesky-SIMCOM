@@ -138,22 +138,20 @@ class ADSBprotocol(core.Entity):
         """The ADS-B data are updated based on the actual AC data, except for
         GHOST aircraft."""
 
-        n = traf.ntraf
-
         # GHOST aircraft cannot use real data to update ADS-B fields
         mask = self.attacks.type != "GHOST"
 
         indices = np.where(mask)[0]
 
         # Aircraft update their ADS-B value from their actual values
-        self.lat[mask] = traf.lat[:n]
-        self.lon[mask] = traf.lon[:n]
-        noise = np.random.uniform(-150, 150, size=n)
-        self.altbaro[mask] = traf.alt[:n]
-        self.altGNSS[mask] = np.maximum(traf.alt[:n] + noise, 0)
-        self.gsnorth[mask] = traf.gsnorth[:n]
-        self.gseast[mask] = traf.gseast[:n]
-        self.vs[mask] = traf.vs[:n]
+        self.lat[mask] = traf.lat[mask]
+        self.lon[mask] = traf.lon[mask]
+        noise = np.random.uniform(-150, 150, size=len(indices))
+        self.altbaro[mask] = traf.alt[mask]
+        self.altGNSS[mask] = np.maximum(traf.alt[mask] + noise, 0)
+        self.gsnorth[mask] = traf.gsnorth[mask]
+        self.gseast[mask] = traf.gseast[mask]
+        self.vs[mask] = traf.vs[mask]
 
         # Compute ADS-B messages for all aircraft
         for i in indices:

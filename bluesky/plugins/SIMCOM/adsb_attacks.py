@@ -118,9 +118,7 @@ class ADSBattacks(core.Entity):
         mask = self.type == "GHOST"
         indices = np.where(mask)[0]
 
-        # We loop backward, so when we call del self.arg the indices
-        # that get shifted are already processed
-        for i in sorted(indices, reverse=True):
+        for i in indices:
             # Is AC initialized?
             if self.arg[i]["init"] == 1:
                 # Computes ADSB messages
@@ -128,12 +126,6 @@ class ADSBattacks(core.Entity):
                 adsb.msg_pos_e[i] = ADSB_position(adsb, i, True)
                 adsb.msg_id[i] = ADSB_identification(adsb, i)
                 adsb.msg_v[i] = ADSB_velocity(adsb, i)
-            else:
-                # Delete selected AC
-                self.del_ghost(adsb, i)
-                # Delete the attack args
-                del self.arg[i]
-                self.type = np.delete(self.type, i)
 
     def init_ghosts(self, adsb):
         """Inizializes all the GHOST aircraft."""
@@ -152,76 +144,39 @@ class ADSBattacks(core.Entity):
     def cre_ghost(self, adsb, i):
         """Inizializes GHOST aircraft."""
 
-        # Append GHOST values to the ADS-B data
-        if self.arg[i]["id"] not in traf.id:
-            traf.id.append(self.arg[i]["id"])
-        else:
-            idtmp = chr(randint(65, 90)) + chr(randint(65, 90)) + "{:>05}"
-            traf.id.append(idtmp.format(0))
-        adsb.icao = np.append(adsb.icao, self.arg[i]["icao"])
-        adsb.callsign.append(self.arg[i]["callsign"])
+        # Assign GHOST values to the ADS-B data
+        adsb.icao[i] = self.arg[i]["icao"]
+        adsb.callsign[i] = self.arg[i]["callsign"]
         # Flight data
-        adsb.altbaro = np.append(adsb.altbaro, self.arg[i]["alt"])
-        adsb.altGNSS = np.append(adsb.altGNSS, self.arg[i]["alt"])
-        adsb.lat = np.append(adsb.lat, self.arg[i]["lat"])
-        adsb.lon = np.append(adsb.lon, self.arg[i]["lon"])
+        adsb.altbaro[i] = self.arg[i]["alt"]
+        adsb.altGNSS[i] = self.arg[i]["alt"]
+        adsb.lat[i] = self.arg[i]["lat"]
+        adsb.lon[i] = self.arg[i]["lon"]
         rads = np.deg2rad(self.arg[i]["trk"])
-        gsnorth = self.arg[i]["gs"] * np.cos(rads)
-        gseast = self.arg[i]["gs"] * np.sin(rads)
-        adsb.gsnorth = np.append(adsb.gsnorth, gsnorth)
-        adsb.gseast = np.append(adsb.gseast, gseast)
-        adsb.vs = np.append(adsb.vs, 0)
-        adsb.gs = np.append(adsb.gs, self.arg[i]["gs"])
-        adsb.trk = np.append(adsb.trk, self.arg[i]["trk"])
+        adsb.gsnorth[i] = self.arg[i]["gs"] * np.cos(rads)
+        adsb.gseast[i] = self.arg[i]["gs"] * np.sin(rads)
+        adsb.vs[i] = 0
+        adsb.gs[i] = self.arg[i]["gs"]
+        adsb.trk[i] = self.arg[i]["trk"]
         # Fixed values
-        adsb.capability = np.append(adsb.capability, 5)
-        adsb.ss = np.append(adsb.ss, 0)
-        adsb.sharedair.role = np.append(adsb.sharedair.role, "")
+        adsb.capability[i] = 5
+        adsb.ss[i] = 0
+        adsb.sharedair.role[i] = ""
         # Conflict detection variables
-        adsb.cd.rpz = np.append(adsb.cd.rpz, settings.asas_pzr * nm)
-        adsb.cd.hpz = np.append(adsb.cd.hpz, settings.asas_pzh * ft)
-        adsb.cd.dtlookahead = np.append(adsb.cd.dtlookahead, settings.asas_dtlookahead)
-        # Compute initial ADSB messages
-        adsb.msg_pos_o = np.append(adsb.msg_pos_o, ADSB_position(adsb, i, False))
-        adsb.msg_pos_e = np.append(adsb.msg_pos_e, ADSB_position(adsb, i, True))
-        adsb.msg_id = np.append(adsb.msg_id, ADSB_identification(adsb, i))
-        adsb.msg_v = np.append(adsb.msg_v, ADSB_velocity(adsb, i))
-
-    def del_ghost(self, adsb, i):
-        """Deletes GHOST aircraft."""
-
-        # Delete GHOST values from the ADS-B data
-        traf.id.pop(i)
-        adsb.callsign.pop(i)
-        adsb.icao = np.delete(adsb.icao, i)
-        # Flight data
-        adsb.altbaro = np.delete(adsb.altbaro, i)
-        adsb.altGNSS = np.delete(adsb.altGNSS, i)
-        adsb.lat = np.delete(adsb.lat, i)
-        adsb.lon = np.delete(adsb.lon, i)
-        adsb.gsnorth = np.delete(adsb.gsnorth, i)
-        adsb.gseast = np.delete(adsb.gseast, i)
-        adsb.vs = np.delete(adsb.vs, i)
-        adsb.gs = np.delete(adsb.gs, i)
-        adsb.trk = np.delete(adsb.trk, i)
-        # FIxed values
-        adsb.capability = np.delete(adsb.capability, i)
-        adsb.ss = np.delete(adsb.ss, i)
-        adsb.sharedair.role = np.delete(adsb.sharedair.role, i)
-        # Conflict Detection data
-        adsb.cd.rpz = np.delete(adsb.cd.rpz, i)
-        adsb.cd.hpz = np.delete(adsb.cd.hpz, i)
-        adsb.cd.dtlookahead = np.delete(adsb.cd.dtlookahead, i)
-        # ADS-B messages
-        adsb.msg_pos_o = np.delete(adsb.msg_pos_o, i)
-        adsb.msg_pos_e = np.delete(adsb.msg_pos_e, i)
-        adsb.msg_id = np.delete(adsb.msg_id, i)
-        adsb.msg_v = np.delete(adsb.msg_v, i)
+        adsb.cd.rpz[i] = settings.asas_pzr * nm
+        adsb.cd.hpz[i] = settings.asas_pzh * ft
+        adsb.cd.dtlookahead[i] = settings.asas_dtlookahead
+        # Compute initial ADS-B messages
+        adsb.msg_pos_o[i] = ADSB_position(adsb, i, False)
+        adsb.msg_pos_e[i] = ADSB_position(adsb, i, True)
+        adsb.msg_id[i] = ADSB_identification(adsb, i)
+        adsb.msg_v[i] = ADSB_velocity(adsb, i)
 
     def update_ghost_pos(self, adsb):
         """Update the ADS-B position for GHOST aircraft."""
 
         mask = self.type == "GHOST"
+
         if not np.any(mask):
             return  # Nothing to update
 
@@ -283,9 +238,43 @@ class ADSBattacks(core.Entity):
     ):
         """Creates a GHOST aircraft."""
 
-        self.type = np.append(self.type, "GHOST")
-        self.arg.append({})
+        # If callsign already exists, create a new id
+        if callsign in traf.id:
+            id = chr(randint(65, 90)) + chr(randint(65, 90)) + "{:>05}"
+            id = id.format(0)
+        else:
+            id = callsign
 
+        # Create new aircraft
+        traf.cre(
+            id,
+            actype="",
+            aclat=0.0,
+            aclon=0.0,
+            achdg=0.0,
+            acalt=0.0,
+            acspd=0.0,
+        )
+
+        # Set all ghost true attributes to None
+        for attrname in dir(traf):
+            child = getattr(traf, attrname)
+            # Skip builtins and non-object members
+            if (
+                attrname.startswith("_")
+                or callable(child)
+                or (attrname in ["groups", "perf"])
+            ) and attrname != "_ArrVars":
+                continue
+            if hasattr(child, "_ArrVars"):
+                # Loop over all numpy arrays
+                for varname in child._ArrVars:
+                    var = getattr(child, varname)
+                    var[-1] = None
+
+        # Set attack type
+        self.type[-1] = "GHOST"
+        # Save attack attributes
         self.arg[-1]["alt"] = txt2alt(alt)
         self.arg[-1]["gs"] = gs * kts
         self.arg[-1]["id"] = callsign
@@ -330,14 +319,13 @@ class ADSBattacks(core.Entity):
             elif self.type[i] != "GHOST":
                 return False, f"{acid} is not a GHOST aircraft"
             else:
-                self.arg[i]["init"] = 2
-                return True, f"GHOST aircraft {acid} deleted."
+                traf.delete(i)
         else:
             mask = self.type == "GHOST"
             indices = np.where(mask)[0]
 
-            for i in indices:
-                self.arg[i]["init"] = 2
+            for i in sorted(indices, reverse=True):
+                traf.delete(i)
             return True
 
     @attack.subcommand(name="NONE", brief="NONE acid")
