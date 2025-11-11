@@ -265,6 +265,7 @@ class ADSBprotocol(core.Entity):
                         "traf.alt",
                         "traf.gsnorth",
                         "traf.gseast",
+                        "traf.perf.fuelflow",
                         "adsb.callsign",
                         "adsb.lat",
                         "adsb.lon",
@@ -276,6 +277,9 @@ class ADSBprotocol(core.Entity):
                         "adsb.msg_v",
                         "adsb.msg_id",
                         "adsb.attack.type",
+                        "adsb.sharedair.role",
+                        "adsb.cd.confpairs_unique",
+                        "adsb.cd.dcpa",
                     ]
                 )
 
@@ -305,6 +309,7 @@ class ADSBprotocol(core.Entity):
                         traf.alt,
                         traf.gsnorth,
                         traf.gseast,
+                        traf.perf.fuelflow,
                         self.callsign,
                         self.lat,
                         self.lon,
@@ -316,6 +321,9 @@ class ADSBprotocol(core.Entity):
                         self.msg_v,
                         self.msg_id,
                         self.attacks.type,
+                        self.sharedair.role,
+                        self.cd.confpairs_unique,
+                        self.cd.dcpa,
                     ]
                 )
         else:

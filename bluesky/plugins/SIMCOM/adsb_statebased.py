@@ -293,7 +293,7 @@ class ConflictDetection(core.Entity, replaceable=True):
         # --------------------------------------------------------------------------
         # Ownship conflict flag and max tCPA
         inconf = np.any(swconfl, 1)
-        tcpamax = np.max(tcpa * swconfl, 1)
+        tcpamax = np.nanmax(tcpa * swconfl, 1)
 
         # Select conflicting pairs: each a/c gets their own record
         confpairs = [(traf.id[i], traf.id[j]) for i, j in zip(*np.where(swconfl))]

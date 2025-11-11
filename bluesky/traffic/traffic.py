@@ -774,27 +774,30 @@ class Traffic(Entity):
             idx = idxorwp
             acid = self.id[idx]
             actype = self.type[idx]
-            latlon = latlon2txt(self.lat[idx], self.lon[idx])
-            alt = round(self.alt[idx] / ft)
-            hdg = round(self.hdg[idx])
-            trk = round(self.trk[idx])
-            cas = round(self.cas[idx] / kts)
-            tas = round(self.tas[idx] / kts)
-            gs = round(self.gs[idx] / kts)
-            M = self.M[idx]
-            VS = round(self.vs[idx] / ft * 60.0)
-            route = self.ap.route[idx]
+            if np.isnan(self.lat[idx]):
+                lines = "No real data for GHOST aircraft."
+            else:
+                latlon = latlon2txt(self.lat[idx], self.lon[idx])
+                alt = round(self.alt[idx] / ft)
+                hdg = round(self.hdg[idx])
+                trk = round(self.trk[idx])
+                cas = round(self.cas[idx] / kts)
+                tas = round(self.tas[idx] / kts)
+                gs = round(self.gs[idx] / kts)
+                M = self.M[idx]
+                VS = round(self.vs[idx] / ft * 60.0)
+                route = self.ap.route[idx]
 
-            # Position report
-            lines = (
-                "Info on %s %s index = %d\n" % (acid, actype, idx)
-                + "Pos: "
-                + latlon
-                + "\n"
-                + "Hdg: %03d   Trk: %03d\n" % (hdg, trk)
-                + "Alt: %d ft  V/S: %d fpm\n" % (alt, VS)
-                + "CAS/TAS/GS: %d/%d/%d kts   M: %.3f\n" % (cas, tas, gs, M)
-            )
+                # Position report
+                lines = (
+                    "Info on %s %s index = %d\n" % (acid, actype, idx)
+                    + "Pos: "
+                    + latlon
+                    + "\n"
+                    + "Hdg: %03d   Trk: %03d\n" % (hdg, trk)
+                    + "Alt: %d ft  V/S: %d fpm\n" % (alt, VS)
+                    + "CAS/TAS/GS: %d/%d/%d kts   M: %.3f\n" % (cas, tas, gs, M)
+                )
 
             # FMS AP modes
             if self.swlnav[idx] and route.nwp > 0 and route.iactwp >= 0:
