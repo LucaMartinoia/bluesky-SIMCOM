@@ -62,11 +62,14 @@
 
 
 # Create experiment area
-00:00:00.50>EXP 43.9, 8.2, 44.4, 9.2
+# 00:00:00.50>EXP 43.9, 8.2, 44.4, 9.2
 00:00:00.50>TAXI OFF
 
 # Speedup to focus point
-00:00:00.50>FF 250
+00:00:00.50>FF 200
+
+# Create data logger
+00:03:30.00>ADSBLOG SIMCOM_EX1
 
 # Attack implementation
 00:05:00.00>ATTACK GHOST EC1685, 43.95, 8.3, 80, FL330, 450
@@ -74,3 +77,6 @@
 00:06:00.00>ATTACK NONE EC1685
 00:06:00.00>ATTACK HIDE EC1685
 00:06:00.00>ATTACK JUMP FR4417 0.1, -0.1, -2000
+
+# Stops data logger
+00:15:00.00>ADSBLOG

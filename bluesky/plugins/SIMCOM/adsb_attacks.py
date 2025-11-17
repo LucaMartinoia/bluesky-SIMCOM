@@ -97,13 +97,16 @@ class ADSBattacks(core.Entity):
         indices = np.where(mask)[0]
 
         for i in indices:
-            lat, lon = pms.adsb.airborne_position(
-                str(adsb.msg_pos_e[i]),
-                str(adsb.msg_pos_o[i]),
-                0,
-                1,
-            )
-            alt = pms.adsb.altitude(str(adsb.msg_pos_e[i])) * ft  # To meters
+            try:  # TO DO: ADD if pms.crc()!=0
+                lat, lon = pms.adsb.airborne_position(
+                    str(adsb.msg_pos_e[i]),
+                    str(adsb.msg_pos_o[i]),
+                    0,
+                    1,
+                )
+                alt = pms.adsb.altitude(str(adsb.msg_pos_e[i])) * ft  # To meters
+            except Exception:
+                lat, lon, alt = np.nan, np.nan, np.nan
 
             adsb.lat[i] = lat + self.arg[i]["lat"]
             adsb.lon[i] = lon + self.arg[i]["lon"]

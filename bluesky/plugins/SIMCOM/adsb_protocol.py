@@ -21,6 +21,7 @@ from bluesky.plugins.SIMCOM.adsb_encoder import (
 from bluesky.plugins.SIMCOM.adsb_attacks import ADSBattacks
 from bluesky.plugins.SIMCOM.adsb_statebased import ConflictDetection
 from bluesky.plugins.SIMCOM.shared_airspace import SharedAirspace
+from bluesky.plugins.SIMCOM.adsb_logger import ADSBlog
 
 """SIMCOM plugin that implements the ADS-B protocol."""
 
@@ -278,7 +279,7 @@ class ADSBprotocol(core.Entity):
                         "adsb.msg_id",
                         "adsb.attack.type",
                         "adsb.sharedair.role",
-                        "adsb.cd.confpairs_unique",
+                        "adsb.cd.confpairs",
                         "adsb.cd.dcpa",
                     ]
                 )
@@ -322,7 +323,7 @@ class ADSBprotocol(core.Entity):
                         self.msg_id,
                         self.attacks.type,
                         self.sharedair.role,
-                        self.cd.confpairs_unique,
+                        self.cd.confpairs,
                         self.cd.dcpa,
                     ]
                 )
@@ -341,7 +342,7 @@ class ADSBprotocol(core.Entity):
         - tlosh: Horizontal time to loss of separation ((hh:mm:)sec)
         """
 
-        # Not in adsb_attacks because it needs access to ADAS-B data.
+        # Not in adsb_attacks because it needs access to ADS-B data.
         latref = self.lat[targetidx]  # [deg]
         lonref = self.lon[targetidx]  # [deg]
         altref = self.altbaro[targetidx]  # [m]

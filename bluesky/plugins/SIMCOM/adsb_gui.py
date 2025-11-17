@@ -201,7 +201,7 @@ class ADSBRadar(RenderObject, layer=101):
         lat, lon, alt, speed, track, callsigns = [], [], [], [], [], []
         # Decode using pyModeS
         for i in range(self.naircraft):
-            try:
+            try:  # TO DO: ADD if pms.crc()!=0
                 lat_i, lon_i = pms.adsb.airborne_position(
                     str(data.ADSBmsg_pos_e[i]),
                     str(data.ADSBmsg_pos_o[i]),
@@ -298,8 +298,6 @@ class ADSBRadar(RenderObject, layer=101):
                 data.tcpamax,
                 lat,
                 lon,
-                self.gt_lat,
-                self.gt_lon,
                 speed,
                 track,
                 data.status,
@@ -312,8 +310,6 @@ class ADSBRadar(RenderObject, layer=101):
                 tcpa,
                 lat0,
                 lon0,
-                gt_lat,
-                gt_lon,
                 gs,
                 trk,
                 sstatus,

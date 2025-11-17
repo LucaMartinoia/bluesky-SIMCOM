@@ -168,8 +168,7 @@ def identification(ca: int, icao: str, tc: int, ec: int, callsign: str) -> str:
 
     # Compute CRC
     crc_value = crc(msg_for_crc, encode=True)
-    crc_bin = int2bin(crc_value, 24)
-    crc_hex = bin2hex(crc_bin).zfill(6)
+    crc_hex = f"{crc_value:06X}"  # 6-digit hex directly
 
     # Full message: 112 bits, 28 hex digits
     full_msg = msg_hex + crc_hex
@@ -297,6 +296,8 @@ def position(
             raise ValueError("Altitude out of range.")
         return full_bits  # 12-bit string
 
+    if any(x is None or np.isnan(x) for x in [lat, lon, alt]):
+        return "0" * 28  # empty ADS-B message
     # DF = 17
     df_bin = int2bin(17, 5)
     ca_bin = int2bin(ca, 3)
@@ -323,14 +324,15 @@ def position(
     # Assemble full message (without CRC)
     msg_bin = df_bin + ca_bin + icao_bin + me_bin
 
+    msg_hex = bin2hex(msg_bin).zfill(22)
+    # Append 6 hex zeros (24 bits) for CRC calculation
+    msg_for_crc = msg_hex + "000000"
+
     # Compute CRC
-    crc_value = crc(bin2hex(msg_bin), encode=True)
-    crc_bin = int2bin(crc_value, 24)
+    crc_value = crc(msg_for_crc, encode=True)
+    crc_hex = f"{crc_value:06X}"  # 6-digit hex directly
 
-    # Final message
-    full_msg = msg_bin + crc_bin
-
-    return bin2hex(full_msg).zfill(28)
+    return msg_hex + crc_hex
 
 
 # --------------------------------------------------------------------
@@ -449,14 +451,15 @@ def velocity(
     # Assemble full message (without CRC)
     msg_bin = df_bin + ca_bin + icao_bin + me_bin
 
+    msg_hex = bin2hex(msg_bin).zfill(22)
+    # Append 6 hex zeros (24 bits) for CRC calculation
+    msg_for_crc = msg_hex + "000000"
+
     # Compute CRC
-    crc_value = crc(bin2hex(msg_bin), encode=True)
-    crc_bin = int2bin(crc_value, 24)
+    crc_value = crc(msg_for_crc, encode=True)
+    crc_hex = f"{crc_value:06X}"  # 6-digit hex directly
 
-    # Final message
-    full_msg = msg_bin + crc_bin
-
-    return bin2hex(full_msg).zfill(28)
+    return msg_hex + crc_hex
 
 
 # --------------------------------------------------------------------

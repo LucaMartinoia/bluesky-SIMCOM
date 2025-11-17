@@ -281,7 +281,7 @@ class MainWindow(QMainWindow, Base):
         """Switch on/off elements and background of map/radar view
 
         Usage:
-            SWRAD GEO/GRID/APT/VOR/WPT/LABEL/ADSBCOVERAGE/TRAIL/POLY [dt]/[value]
+            SWRAD GEO/SAT/APT/WPT/LABEL/SYM [dt]/[value]
         """
         match switch:
             case "GEO":
