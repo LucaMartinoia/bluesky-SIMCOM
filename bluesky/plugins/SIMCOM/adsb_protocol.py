@@ -272,7 +272,7 @@ class ADSBprotocol(core.Entity):
                         "adsb.lon",
                         "adsb.alt",
                         "adsb.gsnorth",
-                        "asdb.gseast",
+                        "adsb.gseast",
                         "adsb.msg_pos_o",
                         "adsb.msg_pos_e",
                         "adsb.msg_v",

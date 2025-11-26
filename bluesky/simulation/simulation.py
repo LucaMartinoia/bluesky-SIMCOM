@@ -1,5 +1,5 @@
-''' BlueSky simulation control object. '''
-import platform
+"""BlueSky simulation control object."""
+
 import time
 import datetime
 import signal
@@ -25,9 +25,11 @@ MINSLEEP = 1e-3
 # Register settings defaults
 bs.settings.set_variable_defaults(simdt=0.05)
 
+
 class Simulation(Base):
-    ''' The simulation object. '''
-    pub_simstate = StatePublisher('STATECHANGE')
+    """The simulation object."""
+
+    pub_simstate = StatePublisher("STATECHANGE")
 
     def __init__(self):
         super().__init__()
@@ -51,7 +53,9 @@ class Simulation(Base):
         self.dtmult = 1.0
 
         # Simulated UTC clock time
-        self.utc = datetime.datetime.utcnow().replace(hour=0, minute=0, second=0, microsecond=0)
+        self.utc = datetime.datetime.utcnow().replace(
+            hour=0, minute=0, second=0, microsecond=0
+        )
 
         # Flag indicating running at fixed rate or fast time
         self.ffmode = False
@@ -68,16 +72,15 @@ class Simulation(Base):
         return dict(simstate=self.state)
 
     def run(self):
-        ''' Start the main loop of this simulation. '''
+        """Start the main loop of this simulation."""
         # When This function is run, BlueSky controls the main loop
-        # In this case, connect to system ABORT/INTERRUPT signal to 
+        # In this case, connect to system ABORT/INTERRUPT signal to
         # allow BlueSky to quit cleanly when an interrupt/kill signal
         # is received
         signal.signal(signal.SIGINT, lambda *args: self.quit())
         signal.signal(signal.SIGTERM, lambda *args: self.quit())
-        if platform.system() == 'Windows':
-            signal.signal(getattr(signal, 'SIGBREAK'), lambda *args: self.quit())
-
+        if platform.system() == "Windows":
+            signal.signal(getattr(signal, "SIGBREAK"), lambda *args: self.quit())
 
         while self.state != bs.END:
             # Process timers
@@ -98,11 +101,11 @@ class Simulation(Base):
         recorder.saveclose()  # Close reording file if it is on
 
     def step(self, dt_increment=0):
-        ''' Perform one simulation timestep.
-        
-            Call this function instead of update if you don't want to run with a fixed
-            real-time rate.
-        '''
+        """Perform one simulation timestep.
+
+        Call this function instead of update if you don't want to run with a fixed
+        real-time rate.
+        """
         if self.state == bs.INIT:
             # Simulation starts as soon as there is traffic, or pending commands
             if bs.traf.ntraf > 0 or len(bs.stack.get_scendata()[0]) > 0:
@@ -117,7 +120,7 @@ class Simulation(Base):
             datalog.update()
             hooks.preupdate.trigger()
 
-            # Determine interval towards next timestep                
+            # Determine interval towards next timestep
             self.simt, self.simdt = simtime.step(dt_increment)
 
             # Update UTC time
@@ -131,9 +134,9 @@ class Simulation(Base):
             hooks.hold.trigger()
 
     def update(self):
-        ''' Perform a simulation update. 
-            This involves performing a simulation step, and when running in real-time mode
-            (or a multiple thereof), sleeping an appropriate time. '''
+        """Perform a simulation update.
+        This involves performing a simulation step, and when running in real-time mode
+        (or a multiple thereof), sleeping an appropriate time."""
         if self.state == bs.INIT:
             if self.syst < 0.0:
                 self.syst = time.time()
@@ -164,8 +167,10 @@ class Simulation(Base):
         # Stop fast-time/benchmark if enabled and set interval has passed
         if self.ffstop is not None and self.simt >= self.ffstop:
             if self.benchdt > 0.0:
-                simstack.echo('Benchmark complete: %d samples in %.3f seconds.' %
-                            (bs.scr.samplecount, time.time() - self.bencht))
+                simstack.echo(
+                    "Benchmark complete: %d samples in %.3f seconds."
+                    % (bs.scr.samplecount, time.time() - self.bencht)
+                )
                 self.benchdt = -1.0
                 self.hold()
             else:
@@ -177,14 +182,14 @@ class Simulation(Base):
             self.prevstate = self.state
 
     def quit(self):
-        ''' Quit simulation.
-            This function is called when a QUIT signal is received from
-            the server, or when quit is called. '''
-        print(f'Simulation node {bs.net.node_id} quitting.')
+        """Quit simulation.
+        This function is called when a QUIT signal is received from
+        the server, or when quit is called."""
+        print(f"Simulation node {bs.net.node_id} quitting.")
         self.state = bs.END
 
     def op(self):
-        ''' Set simulation state to OPERATE. '''
+        """Set simulation state to OPERATE."""
         self.syst = time.time() + self.simdt
         self.ffmode = False
         self.ffstop = None
@@ -192,21 +197,22 @@ class Simulation(Base):
         self.set_dtmult(1.0)
 
     def hold(self):
-        ''' Set simulation state to HOLD. '''
+        """Set simulation state to HOLD."""
         self.syst = time.time() + self.simdt / self.dtmult
         self.state = bs.HOLD
         self.ffmode = False
         self.ffstop = None
 
-
     def reset(self):
-        ''' Reset all simulation objects. '''
+        """Reset all simulation objects."""
         self.state = bs.INIT
         self.syst = -1.0
         self.simt = 0.0
         self.simdt = bs.settings.simdt
         simtime.reset()
-        self.utc = datetime.datetime.utcnow().replace(hour=0, minute=0, second=0, microsecond=0)
+        self.utc = datetime.datetime.now(datetime.UTC).replace(
+            hour=0, minute=0, second=0, microsecond=0
+        )
         self.ffmode = False
         self.set_dtmult(1.0)
         hooks.reset.trigger()
@@ -221,103 +227,112 @@ class Simulation(Base):
         plotter.reset()
 
         # Communicate that this simulation has reset
-        bs.net.send(b'RESET')
+        bs.net.send(b"RESET")
 
     def set_dtmult(self, mult):
-        ''' Set simulation speed multiplier. '''
+        """Set simulation speed multiplier."""
         self.dtmult = mult
 
     def realtime(self, flag=None):
         if flag is not None:
             self.rtmode = flag
 
-        return True, 'Realtime mode is o' + ('n' if self.rtmode else 'ff')
+        return True, "Realtime mode is o" + ("n" if self.rtmode else "ff")
 
     def fastforward(self, nsec=None):
-        ''' Run in fast-time (for nsec seconds if specified). '''
+        """Run in fast-time (for nsec seconds if specified)."""
         self.state = bs.OP
         self.ffmode = True
         self.ffstop = (self.simt + nsec) if nsec else None
 
-    def benchmark(self, fname='IC', dt=300.0):
-        ''' Run a simulation benchmark.
-            Use scenario given by fname.
-            Run for <dt> seconds. '''
+    def benchmark(self, fname="IC", dt=300.0):
+        """Run a simulation benchmark.
+        Use scenario given by fname.
+        Run for <dt> seconds."""
         simstack.ic(fname)
-        self.bencht  = 0.0  # Start time will be set at next sim cycle
+        self.bencht = 0.0  # Start time will be set at next sim cycle
         self.benchdt = dt
 
     def batch(self, fname):
-        ''' Run a batch of scenarios. '''
+        """Run a batch of scenarios."""
         # The contents of the scenario file are meant as a batch list:
         # send to server and clear stack
         self.reset()
         try:
-            scentime, scencmd = zip(*[tc for tc in simstack.readscn(fname, sort=False)])
-            bs.net.send(b'BATCH', (scentime, scencmd), bs.net.server_id)
+            scentime, scencmd = zip(*[tc for tc in simstack.readscn(fname)])
+            bs.net.send(b"BATCH", (scentime, scencmd), bs.net.server_id)
         except FileNotFoundError:
-            return False, f'BATCH: File not found: {fname}'
+            return False, f"BATCH: File not found: {fname}"
 
         return True
 
-    @subscriber(topic='BATCH', broadcast=False)
+    @subscriber(topic="BATCH", broadcast=False)
     def start_batch_scenario(self, name, scentime, scencmd):
-        ''' Start a scenario coming from the server batch. '''
+        """Start a scenario coming from the server batch."""
         # We are in a batch simulation, and received an entire scenario. Assign it to the stack.
         self.reset()
         bs.stack.set_scendata(scentime, scencmd)
         self.op()
 
-    @state_publisher(topic='SIMSETTINGS')
+    @state_publisher(topic="SIMSETTINGS")
     def pub_simsettings(self):
-        ''' Publish simulation settings on request. '''
-        return dict(settings=bs.settings._settings_hierarchy,
-            plugins=list(plugin.Plugin.plugins.keys()))
+        """Publish simulation settings on request."""
+        return dict(
+            settings=bs.settings._settings_hierarchy,
+            plugins=list(plugin.Plugin.plugins.keys()),
+        )
 
     def setutc(self, *args):
-        ''' Set simulated clock time offset. '''
+        """Set simulated clock time offset."""
         if not args:
             pass  # avoid error message, just give time
 
         elif len(args) == 1:
-            if args[0].upper() == 'RUN':
-                self.utc = datetime.datetime.utcnow().replace(hour=0, minute=0, second=0, microsecond=0)
+            if args[0].upper() == "RUN":
+                self.utc = datetime.datetime.utcnow().replace(
+                    hour=0, minute=0, second=0, microsecond=0
+                )
 
-            elif args[0].upper() == 'REAL':
+            elif args[0].upper() == "REAL":
                 self.utc = datetime.datetime.today().replace(microsecond=0)
 
-            elif args[0].upper() == 'UTC':
+            elif args[0].upper() == "UTC":
                 self.utc = datetime.datetime.utcnow().replace(microsecond=0)
 
             else:
                 try:
-                    self.utc = datetime.datetime.strptime(args[0], 
-                        '%H:%M:%S.%f' if '.' in args[0] else '%H:%M:%S')
+                    self.utc = datetime.datetime.strptime(
+                        args[0], "%H:%M:%S.%f" if "." in args[0] else "%H:%M:%S"
+                    )
                 except ValueError:
-                    return False, 'Input time invalid'
+                    return False, "Input time invalid"
 
         elif len(args) == 3:
             day, month, year = args
             try:
                 self.utc = datetime.datetime(year, month, day)
             except ValueError:
-                return False, 'Input date invalid.'
+                return False, "Input date invalid."
         elif len(args) == 4:
             day, month, year, timestring = args
             try:
                 self.utc = datetime.datetime.strptime(
-                    f'{year},{month},{day},{timestring}',
-                    '%Y,%m,%d,%H:%M:%S.%f' if '.' in timestring else
-                    '%Y,%m,%d,%H:%M:%S')
+                    f"{year},{month},{day},{timestring}",
+                    (
+                        "%Y,%m,%d,%H:%M:%S.%f"
+                        if "." in timestring
+                        else "%Y,%m,%d,%H:%M:%S"
+                    ),
+                )
             except ValueError:
-                return False, 'Input date invalid.'
+                return False, "Input date invalid."
         else:
-            return False, 'Syntax error'
+            return False, "Syntax error"
 
-        return True, 'Simulation UTC ' + str(self.utc)
+        return True, "Simulation UTC " + str(self.utc)
 
     @staticmethod
     def setseed(value):
-        ''' Set random seed for this simulation. '''
+        """Set random seed for this simulation."""
         seed(value)
         np.random.seed(value)
