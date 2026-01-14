@@ -5,6 +5,7 @@
 00:00:00.50>SHOWADSBPZ TRUE
 00:00:00.50>SHOWTRAF
 00:00:00.50>ADSBCD TRUE
+00:00:00.50>PAN LIMJ
 
 
 # CRE callsign, model, lat, lon, hdg, alt, spd

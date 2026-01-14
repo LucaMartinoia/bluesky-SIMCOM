@@ -4,13 +4,21 @@ from bluesky.tools import geo
 from bluesky.tools.aero import nm, ft, kts
 import pyModeS as pms
 
-"""State-based conflict detection based on ADS-B data."""
+"""
+Ground perspective of state-based conflict detection based on ADS-B data.
+
+TODO:
+- Add toggle to move detection from ground to aircraft (TCAS-like)
+- Modify method to work with data gathered from self.receivers.
+"""
 
 # Eventually, we can create a new set of ASAS settings.
 
 
 class ConflictDetection(core.Entity, replaceable=True):
-    """Conflict Detection implementations."""
+    """
+    Conflict Detection implementations.
+    """
 
     def __init__(self):
         super().__init__()
@@ -59,7 +67,9 @@ class ConflictDetection(core.Entity, replaceable=True):
             self.dtnolook = np.array([])
 
     def clearconfdb(self):
-        """Clear conflict database."""
+        """
+        Clear conflict database.
+        """
         self.confpairs_unique.clear()
         self.lospairs_unique.clear()
         self.confpairs.clear()
@@ -93,7 +103,9 @@ class ConflictDetection(core.Entity, replaceable=True):
         self.global_dtlook = self.global_dtnolook = True
 
     def update(self, ownship, intruder):
-        """Perform an update step of the Conflict Detection implementation."""
+        """
+        Perform an update step of the Conflict Detection implementation.
+        """
 
         # If there are no aircraft or detection is off, pass
         if self.cd_flag and len(ownship.callsign) != 0:
@@ -136,10 +148,8 @@ class ConflictDetection(core.Entity, replaceable=True):
         self.lospairs_unique = lospairs_unique
 
     def detect(self, ownship, intruder, rpz, hpz, dtlookahead):
-        """Detect any conflicts between ownship and intruder.
-        This function should be reimplemented in a subclass for actual
-        detection of conflicts. See for instance
-        bluesky.traffic.asas.statebased.
+        """
+        Pass detect
         """
         confpairs = []
         lospairs = []
@@ -158,7 +168,9 @@ class ConflictDetection(core.Entity, replaceable=True):
     # --------------------------------------------------------------------
 
     def detect_statebased(self, ownship, intruder, rpz, hpz, dtlookahead):
-        """Conflict detection between ownship (traf) and intruder (traf/adsb)."""
+        """
+        Conflict detection between ownship (traf) and intruder (traf/adsb).
+        """
 
         # Identity matrix of order ntraf: avoid ownship-ownship detected conflicts
         n = len(traf.id)
@@ -166,15 +178,16 @@ class ConflictDetection(core.Entity, replaceable=True):
 
         lat, lon, alt, gs, trk, vs = [], [], [], [], [], []
         # Decode using pyModeS
+        # TODO: check CRC and careful about defence schemes
         for i in range(n):
             try:
                 lat_i, lon_i = pms.adsb.airborne_position(
-                    str(ownship.msg_pos_e[i]),
-                    str(ownship.msg_pos_o[i]),
+                    str(ownship.msg_pos_even[i]),
+                    str(ownship.msg_pos_odd[i]),
                     0,
                     1,
                 )
-                alt_i = pms.adsb.altitude(str(ownship.msg_pos_e[i]))
+                alt_i = pms.adsb.altitude(str(ownship.msg_pos_even[i]))
                 gs_i, trk_i, vs_i, _ = pms.adsb.velocity(str(ownship.msg_v[i]))
 
             except Exception:
@@ -317,30 +330,36 @@ class ConflictDetection(core.Entity, replaceable=True):
     # --------------------------------------------------------------------
 
     @stack.command(name="ADSBZONE")
-    def setrpz(self, radius: float = -1.0, *acidx: "acid"):
-        """Set the vertical/horizontal separation distance (i.e., the radius of the
+    def setrpz(self, radius: float = -1.0, *acidx: "acid"):  # type: ignore
+        """
+        Set the vertical/horizontal separation distance (i.e., the radius of the
         protected zone) in nautical miles.
 
         Arguments:
         - radius: The protected zone radius in nautical miles
         - acidx: Aircraft id(s) or group. When this argument is not provided the default PZ radius is changed.
-          Otherwise the PZ radius for the passed aircraft is changed."""
+          Otherwise the PZ radius for the passed aircraft is changed.
+        """
 
         pass
 
     @stack.command(name="ADSBCD", brief="ADSBCD flag")
-    def cd_selection(self, flag: str = None):
-        """Turn ON/OFF the Conflict Detection methods for ADS-B data."""
+    def cd_selection(self, flag: str = ""):
+        """
+        Turn ON/OFF the Conflict Detection methods for ADS-B data.
+        """
 
         # Convert string to bool if provided, else keep None
-        bool_flag = None if flag is None else flag.lower() in ("1", "true", "yes", "on")
+        bool_flag = None if flag is "" else flag.lower() in ("1", "true", "yes", "on")
         self.cd_flag = not self.cd_flag if bool_flag is None else bool_flag
 
         return True, f"Conflict Detection for ADS-B is {self.cd_flag}."
 
     @stack.command(name="ADSBDTLOOK", brief="ADSBDTLOOK [time],[acid]")
-    def setdtlook(self, time: "time" = -1.0, *acidx: "acid"):
-        """Set the lookahead time (in [hh:mm:]sec) for conflict detection."""
+    def setdtlook(self, time: "time" = -1.0, *acidx: "acid"):  # type: ignore
+        """
+        Set the lookahead time (in [hh:mm:]sec) for conflict detection.
+        """
         if time < 0.0:
             return (
                 True,

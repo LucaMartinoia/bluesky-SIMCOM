@@ -15,11 +15,16 @@ from bluesky.network.sharedstate import ActData
 from bluesky.network import context as ctx
 from bluesky.ui import palette
 from bluesky.tools import geo
-from bluesky.tools.aero import nm, kts
+from bluesky.tools.aero import nm, kts, ft
 
 settings.set_variable_defaults(show_danger_traf=True, show_adsb_traf=True)
 
-"""SIMCOM Plugin that implement GUI features related to ADS-B."""
+"""
+SIMCOM Plugin that implement GUI features related to ADS-B.
+
+TODO:
+- Move ADS-B view to be based on ICAO instead of ACID
+"""
 
 
 def init_plugin():
@@ -35,21 +40,16 @@ def init_plugin():
         "plugin_type": "gui",
     }
     # Start the new visual object
-    stack.stack("LABEL 0")  # Hide the standard traffic labels
     addvisual("ADSBRADAR")  # Turn on the new overlay
-
-    print("SIMCOM: All ADS-B plugins loaded!")
+    stack.stack("TOGGLEVIEW 2")
 
     # init_plugin() should always return a configuration dict.
     return config
 
 
 # Static defines
-MAX_NAIRCRAFT = 10000
-MAX_NCONFLICTS = 25000
-MAX_ROUTE_LENGTH = 500
-ROUTE_SIZE = 500
-TRAILS_SIZE = 1000000
+MAX_NAIRCRAFT = 1000
+MAX_NCONFLICTS = 2500
 FLASH_MULT = 4  # The multiplier for the danger flashes
 
 palette.set_default_colours(
@@ -60,7 +60,9 @@ palette.set_default_colours(
 
 
 class ADSBRadar(RenderObject, layer=101):
-    """GUI for ADS-B traffic and danger screen flashes on radar."""
+    """
+    GUI for ADS-B traffic and danger screen flashes on radar.
+    """
 
     # Per remote node attributes
     show_danger: bool = settings.show_danger_traf
@@ -72,16 +74,19 @@ class ADSBRadar(RenderObject, layer=101):
     zoom: ActData[float] = ActData(1.0, group="panzoom")
 
     def __init__(self, parent):
-        """Initialize the graphical objects and other variables."""
+        """
+        Initialize the graphical objects and other variables.
+        """
 
         super().__init__(parent=parent)
         # Initialize the counter that determines the update rate of the danger flashes
         self.counter = 0
         # The colors of the aircraft
         self.current_color = np.empty((self.naircraft, 4), dtype=np.uint8)
+        # Status of the GUI
         self.initialized = False
-        self.gt_lat = np.array([])
-        self.gt_lon = np.array([])
+        # Transition level for altitude labels
+        self.translvl = 5000.0 * ft
 
         # Initialize the GPU buffers
         self.hdg = GLBuffer()
@@ -93,14 +98,16 @@ class ADSBRadar(RenderObject, layer=101):
         self.lbl = GLBuffer()
         self.lblcolor = GLBuffer()
 
-        self.ac_symbol = VertexArrayObject(gl.GL_TRIANGLE_FAN)
+        self.ac_symbol = VertexArrayObject(gl.GL_TRIANGLE_FAN)  # type:ignore
         self.protectedzone = Circle()
-        self.cpalines = VertexArrayObject(gl.GL_LINES)
-        self.aclabels = Text(settings.text_size, (10, 3))
-        self.join_line = VertexArrayObject(gl.GL_LINES)
+        self.cpalines = VertexArrayObject(gl.GL_LINES)  # type:ignore
+        self.aclabels = Text(settings.text_size, (10, 4))
+        self.join_line = VertexArrayObject(gl.GL_LINES)  # type:ignore
 
     def create(self):
-        """Create the graphical objects."""
+        """
+        Create the graphical objects.
+        """
 
         ac_size = settings.ac_size
         self.hdg.create(MAX_NAIRCRAFT * 4, GLBuffer.UsagePattern.StreamDraw)
@@ -154,14 +161,14 @@ class ADSBRadar(RenderObject, layer=101):
         # # --------CPA lines------------------------------------------------
         self.cpalines.create(
             vertex=MAX_NCONFLICTS * 16,
-            color=palette.ADSBconflict,
+            color=palette.ADSBconflict,  # type:ignore
             usage=GLBuffer.UsagePattern.StreamDraw,
         )
 
         # # --------Join line------------------------------------------------
         self.join_line.create(
             vertex=MAX_NAIRCRAFT * 4,
-            color=palette.ADSBaircraft,
+            color=palette.ADSBaircraft,  # type:ignore
             usage=GLBuffer.UsagePattern.StreamDraw,
         )
 
@@ -169,75 +176,39 @@ class ADSBRadar(RenderObject, layer=101):
         self.initialized = True
 
     def draw(self):
-        """Draw all traffic graphics."""
+        """
+        Draw all traffic graphics.
+        """
 
         # Get data for active node
         if self.naircraft == 0 or not self.show_adsb:
             return
 
         # Send the (possibly) updated global uniforms to the buffer
-        self.shaderset.set_vertex_scale_type(self.shaderset.VERTEX_IS_LATLON)
-        self.shaderset.enable_wrap(False)
+        self.shaderset.set_vertex_scale_type(  # type:ignore
+            self.shaderset.VERTEX_IS_LATLON  # type:ignore
+        )
+        self.shaderset.enable_wrap(False)  # type:ignore
 
         self.cpalines.draw()
         self.join_line.draw()
 
-        self.shaderset.enable_wrap(True)
+        self.shaderset.enable_wrap(True)  # type:ignore
         # PZ circles only when they are bigger than the A/C symbols
         if self.show_adsb_pz and self.zoom >= 0.15:
-            self.shaderset.set_vertex_scale_type(self.shaderset.VERTEX_IS_METERS)
+            self.shaderset.set_vertex_scale_type(  # type:ignore
+                self.shaderset.VERTEX_IS_METERS  # type:ignore
+            )
             self.protectedzone.draw(n_instances=self.naircraft)
 
         # Draw traffic symbols
-        self.shaderset.set_vertex_scale_type(self.shaderset.VERTEX_IS_SCREEN)
+        self.shaderset.set_vertex_scale_type(  # type:ignore
+            self.shaderset.VERTEX_IS_SCREEN  # type:ignore
+        )
         self.ac_symbol.draw(n_instances=self.naircraft)
 
         if self.show_lbl:
             self.aclabels.draw(n_instances=self.naircraft)
-
-    def _decode_adsb(self, data):
-        """Decode the ADS-B data."""
-
-        lat, lon, alt, speed, track, callsigns = [], [], [], [], [], []
-        # Decode using pyModeS
-        for i in range(self.naircraft):
-            try:  # TO DO: ADD if pms.crc()!=0
-                lat_i, lon_i = pms.adsb.airborne_position(
-                    str(data.ADSBmsg_pos_e[i]),
-                    str(data.ADSBmsg_pos_o[i]),
-                    0,
-                    1,
-                )
-                alt_i = pms.adsb.altitude(str(data.ADSBmsg_pos_e[i]))
-                speed_i, track_i = pms.adsb.speed_heading(str(data.ADSBmsg_v[i]))
-                callsign_i = pms.adsb.callsign(str(data.ADSBmsg_id[i])).strip("_")
-
-            except Exception:
-                lat_i, lon_i, alt_i, speed_i, track_i, callsign_i = (
-                    np.nan,
-                    np.nan,
-                    np.nan,
-                    np.nan,
-                    np.nan,
-                    "",
-                )
-
-            lat.append(lat_i)
-            lon.append(lon_i)
-            alt.append(alt_i)
-            speed.append(speed_i * kts)
-            track.append(track_i)
-            callsigns.append(callsign_i)
-
-        # Convert after the loop
-        lat = np.array(lat, dtype=np.float32)
-        lon = np.array(lon, dtype=np.float32)
-        alt = np.array(alt, dtype=np.float32)
-        speed = np.array(speed, dtype=np.float32)
-        track = np.array(track, dtype=np.float32)
-        callsigns = np.array(callsigns, dtype=object)
-
-        return lat, lon, alt, speed, track, callsigns
 
     # --------------------------------------------------------------------
     #                      SUBSCIBER FUNCTIONS
@@ -245,13 +216,13 @@ class ADSBRadar(RenderObject, layer=101):
 
     @subscriber(topic="ADSBDATA", actonly=True)
     def update_adsb_data(self, data):
-        """Update GPU buffers with ADS-B data and danger flags."""
+        """
+        Update GPU buffers with ADS-B data and danger flags.
+        """
 
         if not self.initialized:
             return
-        if (
-            ctx.action == ctx.action.Reset or ctx.action == ctx.action.ActChange
-        ):  # TODO hack
+        if ctx.action == ctx.action.Reset or ctx.action == ctx.action.ActChange:
             # Simulation reset: Clear all entries
             self.naircraft = 0
             self.counter = 0
@@ -261,8 +232,7 @@ class ADSBRadar(RenderObject, layer=101):
         self.glsurface.makeCurrent()
         # Update the number of AC
         self.naircraft = len(data.id)
-        # Decode ADS-B data from messages [THIS CAN BE MOVED INSIDE THE FOR LOOP]
-        lat, lon, alt, speed, track, callsigns = self._decode_adsb(data)
+        self.translvl = data.translvl
 
         # If there are aircraft
         if self.naircraft == 0:
@@ -276,62 +246,78 @@ class ADSBRadar(RenderObject, layer=101):
             # Aircraft color and label color
             color = np.empty((min(self.naircraft, MAX_NAIRCRAFT), 4), dtype=np.uint8)
             lblcolor = np.empty((min(self.naircraft, MAX_NAIRCRAFT), 4), dtype=np.uint8)
-            # ADS-B label, conflict and join line
+
+            # Labels and joining line
             rawlabel = ""
             joinlines = np.zeros(4 * self.naircraft, dtype=np.float32)
 
             # Adjust the size of saved color arrays
-            if len(self.current_color) < len(data.id):
+            if len(self.current_color) < self.naircraft:
                 new_colors = np.tile(
-                    palette.ADSBaircraft + (255,),
-                    (len(data.id) - len(self.current_color), 1),
+                    palette.ADSBaircraft + (255,),  # type:ignore
+                    (self.naircraft - len(self.current_color), 1),
                 )
                 self.current_color = np.vstack([self.current_color, new_colors])
-            elif len(self.current_color) > len(data.id):
-                self.current_color = self.current_color[: len(data.id)]
+            elif len(self.current_color) > self.naircraft:
+                self.current_color = self.current_color[: self.naircraft]
 
             # Loop over all aircraft
             zdata = zip(
                 data.id,
-                callsigns,
+                data.callsign,
                 data.inconf,
                 data.tcpamax,
-                lat,
-                lon,
-                speed,
-                track,
-                data.status,
-                data.attack,
+                data.lat,
+                data.lon,
+                data.alt,
+                data.gs,
+                data.vs,
+                data.trk,
+                data.ss,
+                data.gt_lat,
+                data.gt_lon,
             )
             for i, (
                 acid,
                 callsign,
                 inconf,
                 tcpa,
-                lat0,
-                lon0,
+                lat,
+                lon,
+                alt,
                 gs,
+                vs,
                 trk,
-                sstatus,
-                attack,
+                ss,
+                gt_lat,
+                gt_lon,
             ) in enumerate(zdata):
                 if i >= MAX_NAIRCRAFT:
                     break
 
                 # First update the label
                 if self.show_lbl:
-                    # First 10 chars: acid, left-justified
-                    rawlabel += f"{callsign[:8]:<10}"
-                    # Next 10 chars: callsign inside parentheses, truncated/padded to 8 chars total
-                    acid_str = f"({acid[:8]})"  # 8 chars callsign + 2 for parentheses = 10 chars
-                    rawlabel += f"{acid_str:<10}"
-                    # Final line: exactly 10 white spaces to pad/terminate cleanly
-                    rawlabel += " " * 10
+                    if callsign and alt is not None and vs is not None:
+                        # First 10 chars: acid, left-justified
+                        rawlabel += f"{callsign[:8]:<10}"
+                        # Next 10 chars: callsign inside parentheses, truncated/padded to 8 chars total
+                        acid_str = f"<{acid[:8]}>"  # 8 chars callsign + 2 for parentheses = 10 chars
+                        rawlabel += f"{acid_str:<10}"
+                        if alt <= self.translvl:
+                            rawlabel += f"{int(alt / ft + 0.5):<10}"
+                        else:
+                            rawlabel += f"{f'FL{int(alt / ft / 100.0 + 0.5):03d}':<10}"
+
+                        vsarrow = 30 if vs > 0.25 else 31 if vs < -0.25 else 32
+                        rawlabel += f"{int(gs / kts + 0.5):<3}{chr(vsarrow):<7}"
+                    else:
+                        # Fallback row: just <acid> plus 30 spaces
+                        rawlabel += f"<{acid[:8]}>{'':<30}"
 
                 if self.show_adsb:
                     # If not in conflict and not in danger, standard colors
-                    if sstatus == 0 or not self.show_danger:
-                        rgb = palette.ADSBaircraft
+                    if ss == 0 or not self.show_danger:
+                        rgb = palette.ADSBaircraft  # type:ignore
                         # If both ADS-B and true aircraft are shown, reduce ADS-B alpha
                         if self.show_traf:
                             color[i, :] = tuple(rgb) + (120,)
@@ -346,31 +332,40 @@ class ADSBRadar(RenderObject, layer=101):
                         if self.counter % FLASH_MULT == 0:
                             # If green, make red
                             if np.all(
-                                self.current_color[i, :3] == palette.ADSBaircraft
+                                self.current_color[i, :3]
+                                == palette.ADSBaircraft  # type:ignore
                             ):
-                                color[i, :] = tuple(palette.ADSBdanger) + (255,)
+                                color[i, :] = tuple(
+                                    palette.ADSBdanger  # type:ignore
+                                ) + (255,)
                             else:  # If red, make green
-                                color[i, :] = tuple(palette.ADSBaircraft) + (255,)
+                                color[i, :] = tuple(
+                                    palette.ADSBaircraft  # type:ignore
+                                ) + (255,)
                             # Label is always green instead
-                            lblcolor[i, :] = tuple(palette.ADSBaircraft) + (255,)
+                            lblcolor[i, :] = tuple(
+                                palette.ADSBaircraft  # type:ignore
+                            ) + (255,)
                             self.current_color[i] = color[i]
                         else:
                             color[i, :] = self.current_color[i, :]
-                            lblcolor[i, :] = tuple(palette.ADSBaircraft) + (255,)
+                            lblcolor[i, :] = tuple(
+                                palette.ADSBaircraft  # type:ignore
+                            ) + (255,)
 
                     # If in conflict, compute CPA lines
                     if inconf:
-                        color[i, :] = palette.conflict + (255,)
-                        lblcolor[i, :] = palette.conflict + (255,)
+                        color[i, :] = palette.conflict + (255,)  # type:ignore
+                        lblcolor[i, :] = palette.conflict + (255,)  # type:ignore
                         lat1, lon1 = geo.qdrpos(
-                            lat0,
-                            lon0,
+                            lat,
+                            lon,
                             trk,
                             tcpa * gs / nm,
                         )
                         cpalines[4 * confidx : 4 * confidx + 4] = [
-                            lat0,
-                            lon0,
+                            lat,
+                            lon,
                             lat1,
                             lon1,
                         ]
@@ -378,20 +373,20 @@ class ADSBRadar(RenderObject, layer=101):
                         self.current_color[i] = color[i]
 
                     # If both ADS-B and real aircraft are shown, draw join line
-                    if self.show_traf and attack != "GHOST":
+                    if self.show_traf and not np.isnan(gt_lat) and not np.isnan(gt_lon):
                         joinlines[4 * i : 4 * i + 4] = [
-                            lat[i],
-                            lon[i],
-                            self.gt_lat[i],
-                            self.gt_lon[i],
+                            lat,
+                            lon,
+                            gt_lat,
+                            gt_lon,
                         ]
 
             # Update buffers
+            self.lat.update(np.array(data.lat, dtype=np.float32))
+            self.lon.update(np.array(data.lon, dtype=np.float32))
+            self.hdg.update(np.array(data.trk, dtype=np.float32))
+            self.alt.update(np.array(data.alt, dtype=np.float32))
             self.rpz.update(np.array(data.rpz, dtype=np.float32))
-            self.lat.update(lat)
-            self.lon.update(lon)
-            self.hdg.update(track)
-            self.alt.update(alt)
             self.join_line.update(vertex=joinlines)
             self.cpalines.update(vertex=cpalines)
             self.lblcolor.update(lblcolor)
@@ -401,46 +396,55 @@ class ADSBRadar(RenderObject, layer=101):
             # Update the counter
             self.counter += 1
 
-    @subscriber(topic="ACDATA", actonly=True)
-    def update_conflict_data(self, data):
-        """Store true aircraft data used for the joinig line."""
-
-        if not self.initialized:
-            return
-        if (
-            ctx.action == ctx.action.Reset or ctx.action == ctx.action.ActChange
-        ):  # TODO hack
-            # Simulation reset: Clear all entries
-            self.naircraft = 0
-            return
-
-        # True aircraft data
-        self.gt_lat = np.array(data.lat, dtype=np.float32)
-        self.gt_lon = np.array(data.lon, dtype=np.float32)
-
     # --------------------------------------------------------------------
     #                      STACK COMMANDS
     # --------------------------------------------------------------------
 
     @stack.command(name="SHOWDANGER", brief="SHOWDANGER [flag]")
-    def showdanger(self, flag: str = None):
+    def showdanger(self, flag: str = ""):
         """Toggle drawing of danger flashes."""
 
         # Convert string to bool if provided, else keep None
-        bool_flag = None if flag is None else flag.lower() in ("1", "true", "yes", "on")
+        bool_flag = None if flag == "" else flag.lower() in ("1", "true", "yes", "on")
         self.show_danger = not self.show_danger if bool_flag is None else bool_flag
 
         return True, f"Show danger flashes {self.show_danger}."
 
     @stack.command(name="SHOWADSB", aliases=("SHOWADSBTRAF",), brief="SHOWADSB [flag]")
-    def showadsbtraf(self, flag: str = None):
+    def showadsbtraf(self, flag: str = ""):
         """Toggle drawing of ADS-B traffic."""
 
         # Convert string to bool if provided, else keep None
-        bool_flag = None if flag is None else flag.lower() in ("1", "true", "yes", "on")
+        bool_flag = None if flag == "" else flag.lower() in ("1", "true", "yes", "on")
         self.show_adsb = not self.show_adsb if bool_flag is None else bool_flag
 
         return True, f"Show ADS-B {self.show_adsb}."
+
+    @stack.command(name="TOGGLEVIEW", brief="TOGGLEVIEW [1/2/3]")
+    def toggle_view(self, flag: int):
+        """Toggle drawing of aircraft ADS-B traffic."""
+
+        match flag:
+            case 1:
+                self.show_adsb = False
+                self.show_traf = True
+                stack.stack("LABEL 2")
+
+                return True, f"TRUE TRAFFIC view."
+            case 2:
+                self.show_adsb = True
+                self.show_traf = False
+                stack.stack("LABEL 0")
+
+                return True, f"ADS-B TRAFFIC view."
+            case 3:
+                self.show_adsb = True
+                self.show_traf = True
+                stack.stack("LABEL 2")
+
+                return True, f"TRUE and ADS-B TRAFFIC view."
+            case _:
+                return False, f"{flag} is not a valid value for TOGGLEVIEW."
 
     @stack.command(name="MGHOST", brief="MGHOST num")
     def mghost(self, num: int):
@@ -448,17 +452,16 @@ class ADSBRadar(RenderObject, layer=101):
 
         # Pass the call to the stack, with the bound area given by the screen
         stack.forward(
-            f'INSIDE {" ".join(str(el) for el in ref.area.bbox)} ATTACK MGHOST {num}'
+            f'INSIDE {" ".join(str(el) for el in ref.area.bbox)} ATTACK MGHOST {num}'  # type: ignore
         )
-
         return True
 
     @stack.command(name="SHOWADSBPZ", brief="SHOWADSBPZ [flag]")
-    def showpz(self, flag: str = None):
+    def showpz(self, flag: str = ""):
         """Toggle drawing of aircraft protected zones."""
 
         # Convert string to bool if provided, else keep None
-        bool_flag = None if flag is None else flag.lower() in ("1", "true", "yes", "on")
+        bool_flag = None if flag == "" else flag.lower() in ("1", "true", "yes", "on")
         self.show_adsb_pz = not self.show_adsb_pz if bool_flag is None else bool_flag
 
         return True, f"Show protected zones {self.show_adsb_pz}."

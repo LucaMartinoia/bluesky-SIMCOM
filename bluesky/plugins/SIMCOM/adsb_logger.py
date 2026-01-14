@@ -7,21 +7,27 @@ from bluesky import (
     settings,
 )  # , settings, navdb, sim, scr, tools
 
-"""SIMCOM module for logging ADS-B related data."""
+"""
+SIMCOM module for logging ADS-B related data.
 
-"""TO DO:
+TODO:
 - create new functions to create dataframes from various type of data (ground-truth, ADS-B, conflict detection).
 - create flags so that the timed-function updates only if flags are True.
-- create new stack commands to save various kind of dataframes to csv."""
+- create new stack commands to save various kind of dataframes to CSV.
+"""
 
 LOG_UPDATE = 1  # Update dt for LOG [s]
 
 
 class ADSBlog(core.Entity):
-    """Class that implements data loggers."""
+    """
+    Class that implements data loggers.
+    """
 
     def __init__(self):
-        """Initializing the attack class."""
+        """
+        Initializing the attack class.
+        """
 
         super().__init__()
         # Create the loggers

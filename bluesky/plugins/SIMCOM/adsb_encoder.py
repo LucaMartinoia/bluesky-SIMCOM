@@ -1,112 +1,38 @@
 import pyModeS as pms
-from random import randint, uniform
-from textwrap import wrap
-from math import floor, cos, pi, acos, sqrt
 import numpy as np
+from random import randint, uniform
+from math import floor, cos, pi, acos, sqrt
 from bluesky.tools.aero import kts, ft, a0
-from bluesky import traf
+from bluesky.plugins.SIMCOM.tools import hex2bin, bin2hex, int2bin
 
-"""This module defines functions to encode ADS-B messages given the raw data.
+"""
+This module defines functions to encode ADS-B messages given the raw data.
 
-It can encode position, identification and airborne velocity messages."""
+It can encode position, identification and airborne velocity messages.
 
-
-# --------------------------------------------------------------------
-# --------------------------------------------------------------------
-#                           TOOLS
-# --------------------------------------------------------------------
-# --------------------------------------------------------------------
+TODO:
+- vectorialize the encoding if possible
+"""
 
 
-def int2bin(val: int, bits: int) -> str:
-    """Convert integer to binary string with
-    left-zero padding to 'bits' length."""
-
-    return f"{val:0{bits}b}"
-
-
-def int2hex(val: int, digits: int) -> str:
-    """Convert integer to hex string with
-    left-zero padding to 'digits' length."""
-
-    return f"{val:0{digits}X}"
-
-
-def hex2bin(hexstr: str) -> str:
-    """Convert a hexadecimal string to binary string, with zero fillings."""
-
-    num_of_bits = len(hexstr) * 4
-    binstr = bin(int(hexstr, 16))[2:].zfill(int(num_of_bits))
-    return binstr
-
-
-def hex2int(hexstr: str) -> int:
-    """Convert a hexadecimal string to integer."""
-
-    return int(hexstr, 16)
-
-
-def bin2int(binstr: str) -> int:
-    """Convert a binary string to integer."""
-
-    return int(binstr, 2)
-
-
-def bin2hex(binstr: str) -> str:
-    """Convert a binary string to hexadecimal string."""
-
-    return "{0:X}".format(int(binstr, 2))
-
-
-def crc(msg: str, encode: bool = False) -> int:
-    """Mode-S Cyclic Redundancy Check.
-
-    Detect if bit error occurs in the Mode-S message.
-    When encode option is on, the checksum is generated.
-
-    Args:
-        msg: 28 bytes hexadecimal message string
-        encode: True to encode the date only and return the checksum
-    Returns:
-        int: message checksum, or partity bits (encoder)
-
+def append_crc(msg_bin: str) -> str:
     """
+    Take the 88 bits ADS-B message and append CRC.
 
-    # the CRC generator
-    G = [
-        int("11111111", 2),
-        int("11111010", 2),
-        int("00000100", 2),
-        int("10000000", 2),
-    ]
+    Return: the full 112 bit ADS-B message.
+    """
+    msg_hex = bin2hex(msg_bin).zfill(22)  # 88 bits = 22 hex digits
 
-    if encode:
-        msg = msg[:-6] + "000000"
+    # Append 6 hex zeros (24 bits) for CRC calculation
+    msg_for_crc = msg_hex + "000000"
 
-    msgbin = hex2bin(msg)
-    msgbin_split = wrap(msgbin, 8)
-    mbytes = list(map(bin2int, msgbin_split))
+    # Compute CRC
+    crc_value = pms.crc(msg_for_crc, encode=True)
+    crc_hex = f"{crc_value:06X}"  # 6-digit hex directly
 
-    for ibyte in range(len(mbytes) - 3):
-        for ibit in range(8):
-            mask = 0x80 >> ibit
-            bits = mbytes[ibyte] & mask
-
-            if bits > 0:
-                mbytes[ibyte] = mbytes[ibyte] ^ (G[0] >> ibit)
-                mbytes[ibyte + 1] = mbytes[ibyte + 1] ^ (
-                    0xFF & ((G[0] << 8 - ibit) | (G[1] >> ibit))
-                )
-                mbytes[ibyte + 2] = mbytes[ibyte + 2] ^ (
-                    0xFF & ((G[1] << 8 - ibit) | (G[2] >> ibit))
-                )
-                mbytes[ibyte + 3] = mbytes[ibyte + 3] ^ (
-                    0xFF & ((G[2] << 8 - ibit) | (G[3] >> ibit))
-                )
-
-    result = (mbytes[-3] << 16) | (mbytes[-2] << 8) | mbytes[-1]
-
-    return result
+    # Full message: 112 bits, 28 hex digits
+    full_msg = msg_hex + crc_hex
+    return full_msg
 
 
 # --------------------------------------------------------------------
@@ -121,10 +47,14 @@ def crc(msg: str, encode: bool = False) -> int:
 # --------------------------------------------------------------------
 
 
-def identification(ca: int, icao: str, tc: int, ec: int, callsign: str) -> str:
-    """Encode ADS-B identification message.
+def _identification(
+    ca: int, icao: str, TC: int, ec: int, callsign: str, crc: bool = True
+) -> str:
+    """
+    Encode ADS-B identification message.
 
-    capability field, icao address, type code, emitter category, callsign."""
+    capability field, icao address, type code, emitter category, callsign.
+    """
 
     # Validate ICAO
     if len(icao) != 6:
@@ -138,7 +68,7 @@ def identification(ca: int, icao: str, tc: int, ec: int, callsign: str) -> str:
     icao_bin = hex2bin(icao).zfill(24)
 
     # Type Code and Emitter Category
-    tc_bin = int2bin(tc, 5)
+    tc_bin = int2bin(TC, 5)
     ec_bin = int2bin(ec, 3)
 
     # Callsign: uppercase, padded/truncated to 8 characters
@@ -161,17 +91,14 @@ def identification(ca: int, icao: str, tc: int, ec: int, callsign: str) -> str:
 
     # Assemble 88-bit message (without CRC)
     msg_bin = df_bin + ca_bin + icao_bin + me_bin
-    msg_hex = bin2hex(msg_bin).zfill(22)  # 88 bits = 22 hex digits
 
-    # Append 6 hex zeros (24 bits) for CRC calculation
-    msg_for_crc = msg_hex + "000000"
+    if crc:
+        # Full message: 112 bits, 28 hex digits
+        full_msg = append_crc(msg_bin)
+    else:
+        # Full message without CRC
+        full_msg = bin2hex(msg_bin).zfill(22)
 
-    # Compute CRC
-    crc_value = crc(msg_for_crc, encode=True)
-    crc_hex = f"{crc_value:06X}"  # 6-digit hex directly
-
-    # Full message: 112 bits, 28 hex digits
-    full_msg = msg_hex + crc_hex
     return full_msg
 
 
@@ -180,7 +107,7 @@ def identification(ca: int, icao: str, tc: int, ec: int, callsign: str) -> str:
 # --------------------------------------------------------------------
 
 
-def position(
+def _airborne_position(
     ca: int,
     icao: str,
     TC: int,
@@ -191,12 +118,15 @@ def position(
     even: bool,
     lat: float,
     lon: float,
+    crc: bool = True,
 ) -> str:
     # Only TC = 9 fully implemented
-    """Encode ADS-B position message.
+    """
+    Encode ADS-B position message.
 
     capability field, icao address, type code, surveillance status,
-    antenna flag/NAC, altitude, time-sync flag, parity, latitude, longitude."""
+    antenna flag/NAC, altitude, time-sync flag, parity, latitude, longitude.
+    """
 
     def compute_NL(lat: float) -> int:
         """Compute NL (longitude zone number) function."""
@@ -215,7 +145,9 @@ def position(
             return int(floor(nl))
 
     def cpr_encode(lat: float, lon: float, even: bool):
-        """Encode latitude and longitude using CPR."""
+        """
+        Encode latitude and longitude using CPR.
+        """
 
         NZ = 15  # Number of latitude zones N_z
         NL = compute_NL(lat)  # Number of longitude zones NL
@@ -242,18 +174,24 @@ def position(
         return lat_cpr, lon_cpr
 
     def altitude_code_GNSS(alt: float) -> str:
-        """Encode altitude in 12-bit. With GNSS altitude, thus it is just the
+        """
+        Encode altitude in 12-bit. With GNSS altitude, thus it is just the
         altitude in meters converted to binary, which however set the maximum
-        altitude encodable at about 4000m."""
+        altitude encodable at about 4000m.
+        """
 
         return int2bin(int(round(alt)), 12)
 
     def int_to_gray(n: int) -> int:
-        """Convert an integer to Gray code."""
+        """
+        Convert an integer to Gray code.
+        """
         return n ^ (n >> 1)
 
     def altitude_q0(alt_ft: int) -> str:
-        """Encode barometric altitude above 50175 ft using Q=0."""
+        """
+        Encode barometric altitude above 50175 ft using Q=0.
+        """
         alt = alt_ft + 1300
         n500 = alt // 500
         n100 = (alt % 500) // 100
@@ -278,8 +216,10 @@ def position(
         return "".join(bitstring)
 
     def altitude_code_barometric(alt: float) -> str:
-        """Encode barometric altitude into a 12-bit
-        string according to ADS-B standard."""
+        """
+        Encode barometric altitude into a 12-bit
+        string according to ADS-B standard.
+        """
         # Convert to feet and round
         alt_ft = int(round(alt / ft))
 
@@ -324,15 +264,14 @@ def position(
     # Assemble full message (without CRC)
     msg_bin = df_bin + ca_bin + icao_bin + me_bin
 
-    msg_hex = bin2hex(msg_bin).zfill(22)
-    # Append 6 hex zeros (24 bits) for CRC calculation
-    msg_for_crc = msg_hex + "000000"
+    if crc:
+        # Full message: 112 bits, 28 hex digits
+        full_msg = append_crc(msg_bin)
+    else:
+        # Full message without CRC
+        full_msg = bin2hex(msg_bin).zfill(22)
 
-    # Compute CRC
-    crc_value = crc(msg_for_crc, encode=True)
-    crc_hex = f"{crc_value:06X}"  # 6-digit hex directly
-
-    return msg_hex + crc_hex
+    return full_msg
 
 
 # --------------------------------------------------------------------
@@ -340,7 +279,7 @@ def position(
 # --------------------------------------------------------------------
 
 
-def velocity(
+def _airborne_velocity(
     ca: int,
     icao: str,
     IC_flag: int,
@@ -351,12 +290,15 @@ def velocity(
     s_vert: float,
     GNSS_alt: float,
     baro_alt: float,
+    crc: bool = True,
 ) -> str:
     # subTC 3 and 4 are not implemented
-    """Encode ADS-B aircraft velocity message.
+    """
+    Encode ADS-B aircraft velocity message.
 
     capability, icao, intent change flag, NACv, ground speed north, ground speed east,
-    vertical speed source, vertical speed, GNSS altitude, barometric altitude"""
+    vertical speed source, vertical speed, GNSS altitude, barometric altitude.
+    """
 
     def encode_vertical_rate(s_vert):
         # Convert from m/s to ft/min
@@ -403,7 +345,7 @@ def velocity(
     DAlt, SDif = encode_altitude_difference(GNSS_alt, baro_alt)
     Dew, Vew, Dns, Vns, subTC = encode_velocity_gs(gs_north, gs_east)
     TC = 19  # Type code is fixed for airborne velocity messages
-    IFR_flag = 0  # Always zero in modern ADSB versions
+    IFR_flag = 0  # Always zero in modern ADS-B versions
 
     # DF = 17
     df_bin = int2bin(17, 5)
@@ -451,15 +393,14 @@ def velocity(
     # Assemble full message (without CRC)
     msg_bin = df_bin + ca_bin + icao_bin + me_bin
 
-    msg_hex = bin2hex(msg_bin).zfill(22)
-    # Append 6 hex zeros (24 bits) for CRC calculation
-    msg_for_crc = msg_hex + "000000"
+    if crc:
+        # Full message: 112 bits, 28 hex digits
+        full_msg = append_crc(msg_bin)
+    else:
+        # Full message without CRC
+        full_msg = bin2hex(msg_bin).zfill(22)
 
-    # Compute CRC
-    crc_value = crc(msg_for_crc, encode=True)
-    crc_hex = f"{crc_value:06X}"  # 6-digit hex directly
-
-    return msg_hex + crc_hex
+    return full_msg
 
 
 # --------------------------------------------------------------------
@@ -470,12 +411,14 @@ def velocity(
 
 
 def _test_identification():
+    # Define random values
     icao = f"{randint(0, 0xFFFFFF):06X}"
     callsign = f"{randint(0, 0o7777):04o}"
     capability = 5
     TC = 4
     ec = 3
-    msg = identification(
+    # Encode data in ADS-B
+    msg = _identification(
         capability, icao, TC, ec, callsign
     )  # identification(ca: int, icao: str, tc: int, ec: int, callsign: str)
     print(
@@ -487,6 +430,7 @@ def _test_identification():
         f"callsign:\t{callsign}\n"
         f"ADS-B message:\t{msg}\n"
     )
+    # Decode messages with pyModeS
     pms.tell(msg)
 
     print(
@@ -496,6 +440,7 @@ def _test_identification():
 
 
 def _test_position():
+    # Define random values
     icao = f"{randint(0, 0xFFFFFF):06X}"
     capability = 5
     TC = 9
@@ -505,9 +450,14 @@ def _test_position():
     lat = uniform(-90, 270)
     lon = uniform(-90, 90)
     alt = int(uniform(1000, 40000) * ft)  # convert from feet to meters
-    msg0 = position(capability, icao, TC, status, antenna, alt, t0, True, lat, lon)
+    # Encode data in ADS-B
+    msg0 = _airborne_position(
+        capability, icao, TC, status, antenna, alt, t0, True, lat, lon
+    )
     t1 = 1
-    msg1 = position(capability, icao, TC, status, antenna, alt, t1, False, lat, lon)
+    msg1 = _airborne_position(
+        capability, icao, TC, status, antenna, alt, t1, False, lat, lon
+    )
     print(
         "\n"
         "--------------------------------------------\n"
@@ -519,6 +469,7 @@ def _test_position():
         f"ADS-B even message:\t{msg0}\n"
         f"ADS-B odd message:\t{msg1}\n"
     )
+    # Decode messages with pyModeS
     pms.tell(msg0)
     print()
     pms.tell(msg1)
@@ -526,7 +477,6 @@ def _test_position():
     lat_S, lon_S = pms.adsb.position(msg0, msg1, t0, t1)
     alt_S = pms.adsb.altitude(msg0)
 
-    # print(f"\npyModeS position (lat, lon, alt): {lat_S, lon_S, alt_S}\n")
     print(
         f"\nLatitude match:\t\t{abs(lat_S - lat) < 0.01}\n"
         f"Longitude match:\t{abs(lon_S - lon) < 0.01}\n"
@@ -535,6 +485,7 @@ def _test_position():
 
 
 def _test_velocity():
+    # Define random values
     icao = f"{randint(0, 0xFFFFFF):06X}"
     capability = 5
     IC_flag = 0  # intent change flag
@@ -563,7 +514,8 @@ def _test_velocity():
     GNSS_alt = int(uniform(1000, 40000) * ft)  # convert from ft to m
     baro_alt = GNSS_alt + int(uniform(0, 200) * ft)  # convert from ft to m
     alt_dif = (GNSS_alt - baro_alt) / ft
-    msg = velocity(
+    # Encoda data in ADS-B
+    msg = _airborne_velocity(
         capability,
         icao,
         IC_flag,
@@ -587,6 +539,7 @@ def _test_velocity():
         f"GNSS-baro difference:\t{alt_dif:.0f} feet\n"
         f"ADS-B message:\t\t{msg}\n"
     )
+    # Decode messages with pyModeS
     pms.tell(msg)
 
     speed_S, track_S, vert_S, _ = pms.adsb.velocity(msg)
@@ -607,23 +560,36 @@ def _test_velocity():
 TYPE_CODES = dict(identification=4, position=9, velocity=19)
 
 
-def ADSB_identification(traf, index: int):
-    """Encode identification ADS-B message for given aircraft index."""
+def identification(traf, index: int, crc: bool = True):
+    """
+    Encode identification ADS-B message for given aircraft index.
+    """
 
+    # Gather ADS-B data fields
     capability = traf.capability[index]
     icao = traf.icao[index]
     emitter_category = 3
     callsign = traf.callsign[index][:8].upper().ljust(8)
 
-    # Encode and return hex string
-    return identification(
-        capability, icao, TYPE_CODES["identification"], emitter_category, callsign
-    )
+    # Encode and return list with hex string
+    return [
+        _identification(
+            capability,
+            icao,
+            TYPE_CODES["identification"],
+            emitter_category,
+            callsign,
+            crc,
+        )
+    ]
 
 
-def ADSB_position(traf, index: int, even: bool):
-    """Encode position ADS-B message for given aircraft index."""
+def airborne_position(traf, index: int, even: bool, crc: bool = True):
+    """
+    Encode position ADS-B message for given aircraft index.
+    """
 
+    # Gather ADS-B data fields
     capability = traf.capability[index]
     icao = traf.icao[index]
     ss = traf.ss[index]
@@ -631,24 +597,20 @@ def ADSB_position(traf, index: int, even: bool):
     lat = traf.lat[index]
     lon = traf.lon[index]
 
-    # Encode and return hex string
-    return position(
-        capability,
-        icao,
-        TYPE_CODES["position"],
-        ss,
-        1,
-        alt,
-        0,
-        even,
-        lat,
-        lon,
-    )
+    # Encode and return list with hex string
+    return [
+        _airborne_position(
+            capability, icao, TYPE_CODES["position"], ss, 1, alt, 0, even, lat, lon, crc
+        )
+    ]
 
 
-def ADSB_velocity(traf, index: int):  # type: ignore
-    """Encode velocity ADS-B message for given aircraft index."""
+def airborne_velocity(traf, index: int, crc: bool = True):
+    """
+    Encode velocity ADS-B message for given aircraft index.
+    """
 
+    # Gather ADS-B data fields
     capability = traf.capability[index]
     icao = traf.icao[index]
     gs_north = traf.gsnorth[index]
@@ -660,38 +622,22 @@ def ADSB_velocity(traf, index: int):  # type: ignore
     GNSS_alt = traf.altGNSS[index]
     baro_alt = traf.altbaro[index]
 
-    # Encode and return hex string
-    return velocity(
-        capability,
-        icao,
-        ic_flag,
-        NACv,
-        gs_north,
-        gs_east,
-        vert_src,
-        s_vert,
-        GNSS_alt,
-        baro_alt,
-    )
-
-
-def id2idx(acid):
-    """Find index of aircraft id."""
-
-    if not isinstance(acid, str):
-        # id2idx is called for multiple id's
-        # Fast way of finding indices of all ACID's in a given list
-        tmp = dict((v, i) for i, v in enumerate(traf.id))
-        # return [tmp.get(acidi, -1) for acidi in acid]
-    else:
-        # Catch last created id (* or # symbol)
-        if acid in ("#", "*"):
-            return traf.ntraf - 1
-
-        try:
-            return traf.id.index(acid.upper())
-        except:
-            return -1
+    # Encode and return list with hex string
+    return [
+        _airborne_velocity(
+            capability,
+            icao,
+            ic_flag,
+            NACv,
+            gs_north,
+            gs_east,
+            vert_src,
+            s_vert,
+            GNSS_alt,
+            baro_alt,
+            crc,
+        )
+    ]
 
 
 if __name__ == "__main__":

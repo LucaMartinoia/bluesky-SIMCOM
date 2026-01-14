@@ -10,6 +10,8 @@ dependencies = [
     "zmq",
     "bluesky-navdata",
     "openap",
+    "pymodes",
+    "cryptography"
 ]
 
 authors = [
