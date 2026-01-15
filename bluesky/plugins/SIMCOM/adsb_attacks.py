@@ -12,6 +12,7 @@ from random import randint
 from bluesky.tools.misc import txt2alt
 from bluesky.plugins.SIMCOM.tools import id2idx
 import bluesky.plugins.SIMCOM.adsb_encoder as encoder
+from dataclasses import fields
 
 """
 SIMCOM module that implements cyber-attacks on the ADS-B protocol.
@@ -24,26 +25,22 @@ TODO:
 
 class ADSBattacks(core.Entity):
     """
-    Class that implements man-in-the-middle cyber attacks on ADS-B data.
+    Class that implements cyber-attacks on ADS-B protocol.
     """
 
     def __init__(self) -> None:
-        """
-        Initializing the attack class.
-        """
-
         super().__init__()
 
-        # List of implemented attacks
-        self.attack_str = (
+        # List of implemented commands
+        self.command_str = (
             "FREEZE, HIDE, JUMP, MGHOST, GHOST, NONE, STATUS, RESET, ON, OFF"
         )
         self.flag = True  # Module ON/OFF flag
 
-        # Create arrays for the attack arguments and attack type
+        # Create arrays for the attack arguments and cached values
         with self.settrafarrays():
             self.arg = []  # Attack arguments
-            self.type = np.array([], dtype="<U20")  # Attack type
+            self.type = []  # Attack type
 
             # Attacker cached data
             self.alt = np.array([], dtype=float)  # [m]
@@ -68,7 +65,7 @@ class ADSBattacks(core.Entity):
         self.arg[-n:] = [{} for _ in range(n)]
         self.type[-n:] = ["NONE"] * n
 
-        # Attacker cached data
+        # Empty cached data
         self.alt[-n:] = np.nan
         self.lat[-n:] = np.nan
         self.lon[-n:] = np.nan
@@ -83,26 +80,34 @@ class ADSBattacks(core.Entity):
     #                      ATTACKS
     # --------------------------------------------------------------------
 
-    def apply_attacks(self, msgs, index: int) -> None:
+    def apply_attacks(self, msgs: list, index: int) -> None:
         """
-        This function is called every 0.5s in protocol.py.
-        It overwrites the ADS-B messages depending on the attack before they are sent to the GPU.
+        This function is called in protocol.py.
+        It overwrites the ADS-B messages depending on the attack.
 
-        The index is not necessary, it is only to avoid having to do a lookup of pms.icao(msg) to find the index.
+        TODO: The index is not necessary, only avoid lookup of pms.icao(msg) to find the index.
+        TODO: Create eevsedropping function that just records data.
         """
 
         type = self.type[index]
 
+        # Call respective attack
         if type == "FREEZE":
-            self.apply_freeze(msgs, index)
+            self.freeze(msgs, index)
         elif type == "HIDE":
-            self.apply_hide(msgs, index)
+            self.hide(msgs, index)
         elif type == "JUMP":
-            self.apply_jump(msgs, index)
+            self.jump(msgs, index)
         elif type == "GHOST":
-            self.apply_ghost(msgs, index)
+            self.ghost(msgs, index)
 
-    def apply_freeze(self, msgs, index: int) -> None:
+    def eavesdrop(self, msgs, i) -> None:
+        """
+        Simulate passive attacks to update attacker cache.
+        """
+        pass
+
+    def freeze(self, msgs, index: int) -> None:
         """
         Simulate replay attacks by freezing ADS-B outputs to last known values.
         """
@@ -119,7 +124,7 @@ class ADSBattacks(core.Entity):
             # Set initialization flag to True
             self.arg[index]["init"] = True
 
-    def apply_hide(self, msgs, index: int) -> None:
+    def hide(self, msgs, index: int) -> None:
         """
         Simulate jamming by deleting ADS-B outputs.
         """
@@ -130,9 +135,9 @@ class ADSBattacks(core.Entity):
         msgs[index].identification[0] = ""
         msgs[index].velocity[0] = ""
 
-    def apply_jump(self, msgs, index: int):
+    def jump(self, msgs, index: int):
         """
-        Simulate a jummping attack that changes reported ADS-B position.
+        Simulate a spoofing attack that modifies reported ADS-B position.
         """
 
         # Read ADS-B data from messages
@@ -147,54 +152,48 @@ class ADSBattacks(core.Entity):
             alt = pms.adsb.altitude(msgs[index].position_even[0]) * ft  # type:ignore
 
             # Validate altitude
-            if alt < 0 or alt > 50175 * ft:  # choose sensible max for your sim
+            if alt < 0 or alt > 50170 * ft:
                 alt = np.nan
         except Exception:
             lat, lon, alt = np.nan, np.nan, np.nan
 
-        # Update cache with new position
+        # Update cache with new (shifted) position
         self.lat[index] = lat + self.arg[index]["lat"]
         self.lon[index] = lon + self.arg[index]["lon"]
         self.alt[index] = alt + self.arg[index]["alt"]
 
-        capability = 5
-        TC = 9
-        status = 0
-        antenna = 1
-        t0 = 0
-
         # Encode new messages
         msgs[index].position_odd[0] = encoder._airborne_position(
-            capability,
-            self.icao[index],
-            TC,
-            status,
-            antenna,
-            self.alt[index],
-            t0,
-            False,
-            self.lat[index],
-            self.lon[index],
+            ca=5,
+            icao=self.icao[index],
+            TC=9,
+            status=0,
+            antenna=1,
+            alt=self.alt[index],
+            time=0,
+            even=False,
+            lat=self.lat[index],
+            lon=self.lon[index],
         )
         msgs[index].position_even[0] = encoder._airborne_position(
-            capability,
-            self.icao[index],
-            TC,
-            status,
-            antenna,
-            self.alt[index],
-            t0,
-            True,
-            self.lat[index],
-            self.lon[index],
+            ca=5,
+            icao=self.icao[index],
+            TC=9,
+            status=0,
+            antenna=1,
+            alt=self.alt[index],
+            time=1,
+            even=True,
+            lat=self.lat[index],
+            lon=self.lon[index],
         )
 
-    def apply_ghost(self, msgs, index: int) -> None:
+    def ghost(self, msgs, index: int) -> None:
         """
         Simulate ghost aircraft.
         """
 
-        # Is AC initialized?
+        # Is GHOST initialized?
         if self.arg[index]["init"] == 1:
 
             # Computes ADS-B messages
@@ -238,7 +237,7 @@ class ADSBattacks(core.Entity):
                 baro_alt=self.alt[index],
             )
         else:
-            # Initialize GHOST AC
+            # Initialize GHOST
             self.cre_ghost(msgs, index)
             # Set initialization flag to 1
             self.arg[index]["init"] = 1
@@ -251,7 +250,7 @@ class ADSBattacks(core.Entity):
         # Assign GHOST values to the ADS-B data
         self.callsign[i] = self.arg[i]["callsign"]
         # If callsign in ID list, also copy the ICAO address
-        if self.callsign[i] in traf.id:
+        if self.callsign[i] in self.callsign[:i] + self.callsign[i + 1 :]:
             matching_index = traf.id.index(self.callsign[i])
             self.icao[i] = pms.icao(msgs[matching_index].identification[0])
         else:
