@@ -1,18 +1,231 @@
 import pyModeS as pms
 import numpy as np
-from random import randint, uniform
-from math import floor, cos, pi, acos, sqrt
+from dataclasses import dataclass, field
+from bluesky import core
 from bluesky.tools.aero import kts, ft, a0
 from bluesky.plugins.SIMCOM.tools import hex2bin, bin2hex, int2bin
 
-"""
-This module defines functions to encode ADS-B messages given the raw data.
 
-It can encode position, identification and airborne velocity messages.
-
-TODO:
-- vectorialize the encoding if possible
 """
+Module for ADS-B Out implementation.
+"""
+
+
+TYPE_CODES = dict(identification=4, position=9, velocity=19)
+
+
+# List of data for each message type
+@dataclass
+class ADSBmessages:
+    position_even: list = field(default_factory=lambda: [""])
+    position_odd: list = field(default_factory=lambda: [""])
+    identification: list = field(default_factory=lambda: [""])
+    velocity: list = field(default_factory=lambda: [""])
+
+
+class ADSBout(core.TrafficArrays):
+    """
+    Inherits from TrafficArrays instead of Entity because Aircraft and Attacker must own different instances.
+
+    Because of this, it cannot accept BlueSky decorators like Timers and Stack functions.
+    """
+
+    def __init__(self) -> None:
+        super().__init__()
+
+        # ADS-B Out registry
+        with self.settrafarrays():
+            self.icao = []
+            self.callsign = []
+
+            self.altGNSS = np.array([], dtype=float)  # GNSS [m]
+            self.alt = np.array([], dtype=float)  # barometric [m]
+            self.lat = np.array([], dtype=float)  # latitude [deg]
+            self.lon = np.array([], dtype=float)  # longitude [deg]
+            self.gsnorth = np.array([], dtype=float)  # ground speed [m/s]
+            self.gseast = np.array([], dtype=float)  # ground speed [m/s]
+            self.gs = np.array([], dtype=float)  # ground speed [m/s]
+            self.vs = np.array([], dtype=float)  # vertical speed [m/s]
+            self.trk = np.array([], dtype=float)  # track angle [deg]
+            self.capability = []  # CA field [int]
+            self.ss = []  # surveillance status [int]
+
+    def create(self, n: int = 1) -> None:
+        """
+        Empty registry for newly created aircraft.
+        """
+
+        super().create(n)
+
+        # Initialize ADS-B Out registry to empty states
+        self.altGNSS[-n:] = np.nan
+        self.alt[-n:] = np.nan
+        self.lat[-n:] = np.nan
+        self.lon[-n:] = np.nan
+        self.gsnorth[-n:] = np.nan
+        self.gseast[-n:] = np.nan
+        self.gs[-n:] = np.nan
+        self.vs[-n:] = np.nan
+        self.trk[-n:] = np.nan
+        self.capability[-n:] = [5] * n  # 'level 2 transponder, airborne'.
+        self.ss[-n:] = [0] * n  # surveillance status
+
+        self.callsign[-n:] = [""] * n
+        self.icao[-n:] = [""] * n
+
+    def update_registry(self, reference, index: int) -> None:
+        """
+        Updates the dynamical variables from a reference container.
+        """
+
+        # If reference is traf, pass traf.id, else pass callsign
+        self.callsign[index] = (
+            reference.id[index]
+            if hasattr(reference, "id")
+            else reference.callsign[index]
+        )
+        # If callsign assigned, use that, otherwise assign ICAO
+        self.icao[index] = self.icao[index] or f"{np.random.randint(0, 0xFFFFFF+1):06X}"
+
+        # Update ADS-B registry
+        noise = np.random.uniform(-65, 65)
+        self.alt[index] = reference.alt[index]
+        self.altGNSS[index] = np.maximum(reference.alt[index] + noise, 0)
+        self.lat[index] = reference.lat[index]
+        self.lon[index] = reference.lon[index]
+        self.gsnorth[index] = reference.gsnorth[index]
+        self.gseast[index] = reference.gseast[index]
+        self.gs[index] = reference.gs[index]
+        self.vs[index] = reference.vs[index]
+        self.trk[index] = reference.trk[index]
+
+    def empty_registry(self, index: int) -> None:
+        """
+        Empty the registry for a given index.
+        """
+        # Update ADS-B registry
+        self.alt[index] = np.nan
+        self.altGNSS[index] = np.nan
+        self.lat[index] = np.nan
+        self.lon[index] = np.nan
+        self.gsnorth[index] = np.nan
+        self.gseast[index] = np.nan
+        self.gs[index] = np.nan
+        self.vs[index] = np.nan
+        self.trk[index] = np.nan
+
+        self.icao[index] = ""
+        self.callsign[index] = ""
+
+    def encode_msgs(self, index: int, crc: bool = True) -> ADSBmessages:
+        """
+        Encode all ADS-B messages for a given aircraft.
+
+        If crc is False the messages are encoded without CRC.
+        """
+
+        msgs = ADSBmessages()
+        # Compute msgs
+        msgs.position_even = self.airborne_position(index, True, crc)
+        msgs.position_odd = self.airborne_position(index, False, crc)
+        msgs.identification = self.identification(index, crc)
+        msgs.velocity = self.airborne_velocity(index, crc)
+
+        return msgs
+
+    def identification(self, index: int, crc: bool = True) -> list:
+        """
+        Encode identification ADS-B message for given aircraft index.
+        """
+
+        # Gather ADS-B data fields
+        capability = self.capability[index]
+        icao = self.icao[index]
+        emitter_category = 3
+        callsign = self.callsign[index]
+
+        # Encode and return list with hex string
+        return [
+            _identification(
+                capability,
+                icao,
+                TYPE_CODES["identification"],
+                emitter_category,
+                callsign,
+                crc,
+            )
+        ]
+
+    def airborne_position(self, index: int, even: bool, crc: bool = True) -> list:
+        """
+        Encode position ADS-B message for given aircraft index.
+        """
+
+        # Gather ADS-B data fields
+        capability = self.capability[index]
+        icao = self.icao[index]
+        ss = self.ss[index]
+        alt = self.alt[index]
+        lat = self.lat[index]
+        lon = self.lon[index]
+
+        # Encode and return list with hex string
+        return [
+            _airborne_position(
+                capability,
+                icao,
+                TYPE_CODES["position"],
+                ss,
+                1,
+                alt,
+                0,
+                even,
+                lat,
+                lon,
+                crc,
+            )
+        ]
+
+    def airborne_velocity(self, index: int, crc: bool = True) -> list:
+        """
+        Encode velocity ADS-B message for given aircraft index.
+        """
+
+        # Gather ADS-B data fields
+        capability = self.capability[index]
+        icao = self.icao[index]
+        gs_north = self.gsnorth[index]
+        gs_east = self.gseast[index]
+        ic_flag = 0
+        NACv = 2
+        vert_src = 1
+        s_vert = self.vs[index]
+        GNSS_alt = self.altGNSS[index]
+        baro_alt = self.alt[index]
+
+        # Encode and return list with hex string
+        return [
+            _airborne_velocity(
+                capability,
+                icao,
+                ic_flag,
+                NACv,
+                gs_north,
+                gs_east,
+                vert_src,
+                s_vert,
+                GNSS_alt,
+                baro_alt,
+                crc,
+            )
+        ]
+
+
+# --------------------------------------------------------------------
+# --------------------------------------------------------------------
+#                           ADS-B ENCODING
+# --------------------------------------------------------------------
+# --------------------------------------------------------------------
 
 
 def append_crc(msg_bin: str) -> str:
@@ -33,13 +246,6 @@ def append_crc(msg_bin: str) -> str:
     # Full message: 112 bits, 28 hex digits
     full_msg = msg_hex + crc_hex
     return full_msg
-
-
-# --------------------------------------------------------------------
-# --------------------------------------------------------------------
-#                           ADS-B ENCODING
-# --------------------------------------------------------------------
-# --------------------------------------------------------------------
 
 
 # --------------------------------------------------------------------
@@ -139,10 +345,10 @@ def _airborne_position(
         elif abs(lat) > 87:  # Near the poles, NL is also fixed
             return 1
         else:  # Computes the NL
-            a = 1 - cos(pi / (2 * NZ))
-            b = cos(pi * lat / 180) ** 2
-            nl = 2 * pi / (acos(1 - a / b))
-            return int(floor(nl))
+            a = 1 - np.cos(np.pi / (2 * NZ))
+            b = np.cos(np.pi * lat / 180) ** 2
+            nl = 2 * np.pi / (np.arccos(1 - a / b))
+            return int(np.floor(nl))
 
     def cpr_encode(lat: float, lon: float, even: bool):
         """
@@ -161,8 +367,8 @@ def _airborne_position(
             dLat = 360.0 / (4 * NZ - 1)
             dLon = 360.0 / max(NL - 1, 1)
 
-        lat_index = floor(lat / dLat)  # The index of the lat/lon zone.
-        lon_index = floor(lon / dLon)
+        lat_index = np.floor(lat / dLat)  # The index of the lat/lon zone.
+        lon_index = np.floor(lon / dLon)
         relative_lat = lat - dLat * lat_index  # Lat/lon, relative to the zone.
         relative_lon = lon - dLon * lon_index
 
@@ -325,7 +531,7 @@ def _airborne_velocity(
 
     def encode_velocity_gs(gs_north, gs_east):
         # check if supersonic speed
-        subTC = 1 if sqrt(gs_north**2 + gs_east**2) < a0 else 2
+        subTC = 1 if np.sqrt(gs_north**2 + gs_east**2) < a0 else 2
 
         # compute sign of east-west and north-south ground velocities
         Dew = 0 if gs_east >= 0 else 1
@@ -405,15 +611,15 @@ def _airborne_velocity(
 
 # --------------------------------------------------------------------
 # --------------------------------------------------------------------
-#                              TESTS FUNCTIONS
+#                         TEST FUNCTIONS
 # --------------------------------------------------------------------
 # --------------------------------------------------------------------
 
 
 def _test_identification():
     # Define random values
-    icao = f"{randint(0, 0xFFFFFF):06X}"
-    callsign = f"{randint(0, 0o7777):04o}"
+    icao = f"{np.random.randint(0, 0xFFFFFF):06X}"
+    callsign = f"{np.random.randint(0, 0o7777):04o}"
     capability = 5
     TC = 4
     ec = 3
@@ -441,15 +647,15 @@ def _test_identification():
 
 def _test_position():
     # Define random values
-    icao = f"{randint(0, 0xFFFFFF):06X}"
+    icao = f"{np.random.randint(0, 0xFFFFFF):06X}"
     capability = 5
     TC = 9
     status = 0
     antenna = 1
     t0 = 0
-    lat = uniform(-90, 270)
-    lon = uniform(-90, 90)
-    alt = int(uniform(1000, 40000) * ft)  # convert from feet to meters
+    lat = np.random.uniform(-90, 270)
+    lon = np.random.uniform(-90, 90)
+    alt = int(np.random.uniform(1000, 40000) * ft)  # convert from feet to meters
     # Encode data in ADS-B
     msg0 = _airborne_position(
         capability, icao, TC, status, antenna, alt, t0, True, lat, lon
@@ -486,7 +692,7 @@ def _test_position():
 
 def _test_velocity():
     # Define random values
-    icao = f"{randint(0, 0xFFFFFF):06X}"
+    icao = f"{np.random.randint(0, 0xFFFFFF):06X}"
     capability = 5
     IC_flag = 0  # intent change flag
     NACv = 3  # velocity accuracy (0 bad, 4 good)
@@ -498,8 +704,8 @@ def _test_velocity():
         such that the total ground speed does not exceed `max_speed`.
         """
         # Sample random direction (angle) and magnitude <= max_speed
-        angle = uniform(0, 2 * np.pi)
-        speed = uniform(0, max_speed)
+        angle = np.random.uniform(0, 2 * np.pi)
+        speed = np.random.uniform(0, max_speed)
 
         # Compute components
         v_ew = speed * np.cos(angle)  # East-West component
@@ -510,9 +716,9 @@ def _test_velocity():
     v_ns, v_ew = random_velocity_components()
     speed = np.sqrt(v_ns**2 + v_ew**2)
     track = np.degrees(np.arctan2(v_ew, v_ns)) % 360
-    vert_s = uniform(-20, 20)  # vertical rate in m/s
-    GNSS_alt = int(uniform(1000, 40000) * ft)  # convert from ft to m
-    baro_alt = GNSS_alt + int(uniform(0, 200) * ft)  # convert from ft to m
+    vert_s = np.random.uniform(-20, 20)  # vertical rate in m/s
+    GNSS_alt = int(np.random.uniform(1000, 40000) * ft)  # convert from ft to m
+    baro_alt = GNSS_alt + int(np.random.uniform(0, 200) * ft)  # convert from ft to m
     alt_dif = (GNSS_alt - baro_alt) / ft
     # Encoda data in ADS-B
     msg = _airborne_velocity(
@@ -551,93 +757,6 @@ def _test_velocity():
         f"Vertical rate match:\t{abs(vert_s * 60 / ft - vert_S) < 64}\n"
         f"GNSS-baro alt match:\t{abs(alt_dif_S - alt_dif) < 25}\n"
     )
-
-
-# --------------------------------------------------------------------
-#                      ADS-B WRAPPER FUNCTIONS
-# --------------------------------------------------------------------
-
-TYPE_CODES = dict(identification=4, position=9, velocity=19)
-
-
-def identification(traf, index: int, crc: bool = True):
-    """
-    Encode identification ADS-B message for given aircraft index.
-    """
-
-    # Gather ADS-B data fields
-    capability = traf.capability[index]
-    icao = traf.icao[index]
-    emitter_category = 3
-    callsign = traf.callsign[index][:8].upper().ljust(8)
-
-    # Encode and return list with hex string
-    return [
-        _identification(
-            capability,
-            icao,
-            TYPE_CODES["identification"],
-            emitter_category,
-            callsign,
-            crc,
-        )
-    ]
-
-
-def airborne_position(traf, index: int, even: bool, crc: bool = True):
-    """
-    Encode position ADS-B message for given aircraft index.
-    """
-
-    # Gather ADS-B data fields
-    capability = traf.capability[index]
-    icao = traf.icao[index]
-    ss = traf.ss[index]
-    alt = traf.altbaro[index]
-    lat = traf.lat[index]
-    lon = traf.lon[index]
-
-    # Encode and return list with hex string
-    return [
-        _airborne_position(
-            capability, icao, TYPE_CODES["position"], ss, 1, alt, 0, even, lat, lon, crc
-        )
-    ]
-
-
-def airborne_velocity(traf, index: int, crc: bool = True):
-    """
-    Encode velocity ADS-B message for given aircraft index.
-    """
-
-    # Gather ADS-B data fields
-    capability = traf.capability[index]
-    icao = traf.icao[index]
-    gs_north = traf.gsnorth[index]
-    gs_east = traf.gseast[index]
-    ic_flag = 0
-    NACv = 2
-    vert_src = 1
-    s_vert = traf.vs[index]
-    GNSS_alt = traf.altGNSS[index]
-    baro_alt = traf.altbaro[index]
-
-    # Encode and return list with hex string
-    return [
-        _airborne_velocity(
-            capability,
-            icao,
-            ic_flag,
-            NACv,
-            gs_north,
-            gs_east,
-            vert_src,
-            s_vert,
-            GNSS_alt,
-            baro_alt,
-            crc,
-        )
-    ]
 
 
 if __name__ == "__main__":

@@ -1,6 +1,5 @@
 import numpy as np
-import pyModeS as pms
-from bluesky import stack, settings, ref  # , settings, navdb, sim, scr, tools
+from bluesky import stack, settings, ref
 from bluesky.ui.qtgl.glhelpers import (
     gl,
     RenderObject,
@@ -20,37 +19,31 @@ from bluesky.tools.aero import nm, kts, ft
 settings.set_variable_defaults(show_danger_traf=True, show_adsb_traf=True)
 
 """
-SIMCOM Plugin that implement GUI features related to ADS-B.
-
-TODO:
-- Move ADS-B view to be based on ICAO instead of ACID
+Plugin that implements GUI features related to ADS-B traffic.
 """
 
 
 def init_plugin():
     """Plugin initialisation function."""
 
-    print("SIMCOM: Loading ADS-B GUI plugin...")
-
     # Configuration parameters
     config = {
         # The name of your plugin
-        "plugin_name": "ADSBGUI",
+        "plugin_name": "ADSBVIEW",
         # The type of this plugin.
         "plugin_type": "gui",
     }
     # Start the new visual object
-    addvisual("ADSBRADAR")  # Turn on the new overlay
-    stack.stack("TOGGLEVIEW 2")
+    addvisual("ADSBVIEW")  # Turn on the new overlay
+    stack.stack("TOGGLEVIEW 3")  # Turn on ADS-B + traffic view
 
-    # init_plugin() should always return a configuration dict.
     return config
 
 
 # Static defines
 MAX_NAIRCRAFT = 1000
 MAX_NCONFLICTS = 2500
-FLASH_MULT = 4  # The multiplier for the danger flashes
+FLASH_MULT = 2  # The multiplier for the danger flashes
 
 palette.set_default_colours(
     ADSBaircraft=(0, 255, 0),
@@ -59,9 +52,9 @@ palette.set_default_colours(
 )
 
 
-class ADSBRadar(RenderObject, layer=101):
+class ADSBview(RenderObject, layer=101):
     """
-    GUI for ADS-B traffic and danger screen flashes on radar.
+    GUI for ADS-B traffic on radar screen.
     """
 
     # Per remote node attributes
@@ -74,10 +67,6 @@ class ADSBRadar(RenderObject, layer=101):
     zoom: ActData[float] = ActData(1.0, group="panzoom")
 
     def __init__(self, parent):
-        """
-        Initialize the graphical objects and other variables.
-        """
-
         super().__init__(parent=parent)
         # Initialize the counter that determines the update rate of the danger flashes
         self.counter = 0
@@ -102,7 +91,7 @@ class ADSBRadar(RenderObject, layer=101):
         self.protectedzone = Circle()
         self.cpalines = VertexArrayObject(gl.GL_LINES)  # type:ignore
         self.aclabels = Text(settings.text_size, (10, 4))
-        self.join_line = VertexArrayObject(gl.GL_LINES)  # type:ignore
+        self.joinline = VertexArrayObject(gl.GL_LINES)  # type:ignore
 
     def create(self):
         """
@@ -165,8 +154,8 @@ class ADSBRadar(RenderObject, layer=101):
             usage=GLBuffer.UsagePattern.StreamDraw,
         )
 
-        # # --------Join line------------------------------------------------
-        self.join_line.create(
+        # # --------Join lines-----------------------------------------------
+        self.joinline.create(
             vertex=MAX_NAIRCRAFT * 4,
             color=palette.ADSBaircraft,  # type:ignore
             usage=GLBuffer.UsagePattern.StreamDraw,
@@ -191,7 +180,7 @@ class ADSBRadar(RenderObject, layer=101):
         self.shaderset.enable_wrap(False)  # type:ignore
 
         self.cpalines.draw()
-        self.join_line.draw()
+        self.joinline.draw()
 
         self.shaderset.enable_wrap(True)  # type:ignore
         # PZ circles only when they are bigger than the A/C symbols
@@ -217,7 +206,7 @@ class ADSBRadar(RenderObject, layer=101):
     @subscriber(topic="ADSBDATA", actonly=True)
     def update_adsb_data(self, data):
         """
-        Update GPU buffers with ADS-B data and danger flags.
+        Update GPU buffers with ADS-B data.
         """
 
         if not self.initialized:
@@ -252,14 +241,18 @@ class ADSBRadar(RenderObject, layer=101):
             joinlines = np.zeros(4 * self.naircraft, dtype=np.float32)
 
             # Adjust the size of saved color arrays
-            if len(self.current_color) < self.naircraft:
+            palette_colors = np.array(
+                palette.ADSBaircraft + (255,), dtype=np.uint8
+            )  # (4,)
+
+            # Resize current_color to exactly naircraft entries
+            if len(self.current_color) != self.naircraft:
                 new_colors = np.tile(
-                    palette.ADSBaircraft + (255,),  # type:ignore
-                    (self.naircraft - len(self.current_color), 1),
-                )
-                self.current_color = np.vstack([self.current_color, new_colors])
-            elif len(self.current_color) > self.naircraft:
-                self.current_color = self.current_color[: self.naircraft]
+                    palette_colors, (self.naircraft, 1)
+                )  # (naircraft, 4)
+                copy_count = min(len(self.current_color), self.naircraft)
+                new_colors[:copy_count] = self.current_color[:copy_count]
+                self.current_color = new_colors
 
             # Loop over all aircraft
             zdata = zip(
@@ -292,12 +285,14 @@ class ADSBRadar(RenderObject, layer=101):
                 gt_lat,
                 gt_lon,
             ) in enumerate(zdata):
+
                 if i >= MAX_NAIRCRAFT:
                     break
 
                 # First update the label
                 if self.show_lbl:
-                    if callsign and alt is not None and vs is not None:
+                    if callsign and not np.isnan(alt) and not np.isnan(vs):
+
                         # First 10 chars: acid, left-justified
                         rawlabel += f"{callsign[:8]:<10}"
                         # Next 10 chars: callsign inside parentheses, truncated/padded to 8 chars total
@@ -312,7 +307,7 @@ class ADSBRadar(RenderObject, layer=101):
                         rawlabel += f"{int(gs / kts + 0.5):<3}{chr(vsarrow):<7}"
                     else:
                         # Fallback row: just <acid> plus 30 spaces
-                        rawlabel += f"<{acid[:8]}>{'':<30}"
+                        rawlabel += f"<{acid[:8]}>".ljust(40)
 
                 if self.show_adsb:
                     # If not in conflict and not in danger, standard colors
@@ -329,29 +324,28 @@ class ADSBRadar(RenderObject, layer=101):
                         lblcolor[i, :] = tuple(rgb) + (255,)
 
                     else:
+                        # Precompute RGBA tuples once
+                        green_rgba = np.array(
+                            palette.ADSBaircraft + (255,), dtype=np.uint8
+                        )  # type:ignore
+                        red_rgba = np.array(
+                            palette.ADSBdanger + (255,), dtype=np.uint8
+                        )  # type:ignore
                         if self.counter % FLASH_MULT == 0:
-                            # If green, make red
-                            if np.all(
-                                self.current_color[i, :3]
-                                == palette.ADSBaircraft  # type:ignore
-                            ):
-                                color[i, :] = tuple(
-                                    palette.ADSBdanger  # type:ignore
-                                ) + (255,)
-                            else:  # If red, make green
-                                color[i, :] = tuple(
-                                    palette.ADSBaircraft  # type:ignore
-                                ) + (255,)
-                            # Label is always green instead
-                            lblcolor[i, :] = tuple(
-                                palette.ADSBaircraft  # type:ignore
-                            ) + (255,)
+                            # Flip between green/red
+                            is_green = np.all(
+                                self.current_color[i, :3] == palette.ADSBaircraft
+                            )  # type:ignore
+                            color[i] = red_rgba if is_green else green_rgba
+
+                            # Label always green
+                            lblcolor[i] = green_rgba
+
+                            # Update current color
                             self.current_color[i] = color[i]
                         else:
-                            color[i, :] = self.current_color[i, :]
-                            lblcolor[i, :] = tuple(
-                                palette.ADSBaircraft  # type:ignore
-                            ) + (255,)
+                            color[i] = self.current_color[i]
+                            lblcolor[i] = green_rgba
 
                     # If in conflict, compute CPA lines
                     if inconf:
@@ -387,7 +381,7 @@ class ADSBRadar(RenderObject, layer=101):
             self.hdg.update(np.array(data.trk, dtype=np.float32))
             self.alt.update(np.array(data.alt, dtype=np.float32))
             self.rpz.update(np.array(data.rpz, dtype=np.float32))
-            self.join_line.update(vertex=joinlines)
+            self.joinline.update(vertex=joinlines)
             self.cpalines.update(vertex=cpalines)
             self.lblcolor.update(lblcolor)
             self.color.update(color)

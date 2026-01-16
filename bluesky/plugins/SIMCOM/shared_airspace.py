@@ -1,5 +1,4 @@
-import numpy as np
-from bluesky import core, stack, traf, settings  # , settings, navdb, sim, scr, tools
+from bluesky import core, stack, traf, settings
 
 
 """
@@ -27,7 +26,7 @@ class SharedAirspace(core.Entity):
 
         # Create arrays for the attack arguments and attack type
         with self.settrafarrays():
-            self.role = np.array([], dtype="<U10")
+            self.role = []
 
     def create(self, n=1):
         """

@@ -1,15 +1,10 @@
 import numpy as np
 from bluesky import stack, traf, settings, core
 from bluesky.tools import geo
-from bluesky.tools.aero import nm, ft, kts
-import pyModeS as pms
+from bluesky.tools.aero import nm, ft
 
 """
 Ground perspective of state-based conflict detection based on ADS-B data.
-
-TODO:
-- Add toggle to move detection from ground to aircraft (TCAS-like)
-- Modify method to work with data gathered from self.receivers.
 """
 
 # Eventually, we can create a new set of ASAS settings.
@@ -20,7 +15,7 @@ class ConflictDetection(core.Entity, replaceable=True):
     Conflict Detection implementations.
     """
 
-    def __init__(self):
+    def __init__(self) -> None:
         super().__init__()
         ## Default values
         # [m] Horizontal separation minimum for detection
@@ -52,7 +47,7 @@ class ConflictDetection(core.Entity, replaceable=True):
         self.lospairs_all = list()
 
         # Turn on/off conflict detection
-        self.cd_flag = True
+        self.flag = True
 
         # Per-aircraft conflict data
         with self.settrafarrays():
@@ -66,7 +61,7 @@ class ConflictDetection(core.Entity, replaceable=True):
             self.dtlookahead = np.array([])
             self.dtnolook = np.array([])
 
-    def clearconfdb(self):
+    def clearconfdb(self) -> None:
         """
         Clear conflict database.
         """
@@ -82,7 +77,10 @@ class ConflictDetection(core.Entity, replaceable=True):
         self.inconf = np.zeros(len(traf.id))
         self.tcpamax = np.zeros(len(traf.id))
 
-    def create(self, n):
+    def create(self, n: int) -> None:
+        """
+        Default values for new aircraft.
+        """
         super().create(n)
         # Initialise values of own states
         self.rpz[-n:] = self.rpz_def
@@ -90,7 +88,10 @@ class ConflictDetection(core.Entity, replaceable=True):
         self.dtlookahead[-n:] = self.dtlookahead_def
         self.dtnolook[-n:] = self.dtnolook_def
 
-    def reset(self):
+    def reset(self) -> None:
+        """
+        Reset all values.
+        """
         super().reset()
         self.clearconfdb()
         self.confpairs_all.clear()
@@ -102,27 +103,13 @@ class ConflictDetection(core.Entity, replaceable=True):
         self.global_rpz = self.global_hpz = True
         self.global_dtlook = self.global_dtnolook = True
 
-    def update(self, ownship, intruder):
+    def update(self, ownship, intruder) -> None:
         """
         Perform an update step of the Conflict Detection implementation.
         """
 
         # If there are no aircraft or detection is off, pass
-        if self.cd_flag and len(ownship.callsign) != 0:
-            (
-                self.confpairs,
-                self.lospairs,
-                self.inconf,
-                self.tcpamax,
-                self.qdr,
-                self.dist,
-                self.dcpa,
-                self.tcpa,
-                self.tLOS,
-            ) = self.detect_statebased(
-                ownship, intruder, self.rpz, self.hpz, self.dtlookahead
-            )
-        else:
+        if self.flag and len(ownship.callsign) != 0:
             (
                 self.confpairs,
                 self.lospairs,
@@ -134,6 +121,18 @@ class ConflictDetection(core.Entity, replaceable=True):
                 self.tcpa,
                 self.tLOS,
             ) = self.detect(ownship, intruder, self.rpz, self.hpz, self.dtlookahead)
+        else:
+            (
+                self.confpairs,
+                self.lospairs,
+                self.inconf,
+                self.tcpamax,
+                self.qdr,
+                self.dist,
+                self.dcpa,
+                self.tcpa,
+                self.tLOS,
+            ) = self.pass_detect()
 
         # confpairs has conflicts observed from both sides (a, b) and (b, a)
         # confpairs_unique keeps only one of these
@@ -147,9 +146,9 @@ class ConflictDetection(core.Entity, replaceable=True):
         self.confpairs_unique = confpairs_unique
         self.lospairs_unique = lospairs_unique
 
-    def detect(self, ownship, intruder, rpz, hpz, dtlookahead):
+    def pass_detect(self):
         """
-        Pass detect
+        Pass detect.
         """
         confpairs = []
         lospairs = []
@@ -167,62 +166,22 @@ class ConflictDetection(core.Entity, replaceable=True):
     #                      DETECTION ALGORITHMS
     # --------------------------------------------------------------------
 
-    def detect_statebased(self, ownship, intruder, rpz, hpz, dtlookahead):
+    def detect(self, ownship, intruder, rpz, hpz, dtlookahead):
         """
-        Conflict detection between ownship (traf) and intruder (traf/adsb).
+        Conflict detection between ownship and intruder.
         """
-
         # Identity matrix of order ntraf: avoid ownship-ownship detected conflicts
-        n = len(traf.id)
+        n = traf.ntraf
         I = np.eye(n)
-
-        lat, lon, alt, gs, trk, vs = [], [], [], [], [], []
-        # Decode using pyModeS
-        # TODO: check CRC and careful about defence schemes
-        for i in range(n):
-            try:
-                lat_i, lon_i = pms.adsb.airborne_position(
-                    str(ownship.msg_pos_even[i]),
-                    str(ownship.msg_pos_odd[i]),
-                    0,
-                    1,
-                )
-                alt_i = pms.adsb.altitude(str(ownship.msg_pos_even[i]))
-                gs_i, trk_i, vs_i, _ = pms.adsb.velocity(str(ownship.msg_v[i]))
-
-            except Exception:
-                lat_i, lon_i, alt_i, gs_i, trk_i, vs_i = (
-                    np.nan,
-                    np.nan,
-                    np.nan,
-                    np.nan,
-                    np.nan,
-                    np.nan,
-                )
-
-            lat.append(lat_i)
-            lon.append(lon_i)
-            alt.append(alt_i * ft)
-            gs.append(gs_i * kts)
-            trk.append(trk_i)
-            vs.append(vs_i)
-
-        # Convert lists to NumPy arrays for efficient computation
-        lat = np.array(lat, dtype=float)
-        lon = np.array(lon, dtype=float)
-        alt = np.array(alt, dtype=float)
-        gs = np.array(gs, dtype=float)
-        trk = np.array(trk, dtype=float)
-        vs = np.array(vs, dtype=float)
 
         # Horizontal conflict ------------------------------------------------------
 
         # qdrlst is for [i,j] qdr from i to j, from perception of ADSB and own coordinates
         qdr, dist = geo.kwikqdrdist_matrix(
-            np.asmatrix(lat),
-            np.asmatrix(lon),
-            np.asmatrix(lat),
-            np.asmatrix(lon),
+            np.asmatrix(ownship.lat),
+            np.asmatrix(ownship.lon),
+            np.asmatrix(intruder.lat),
+            np.asmatrix(intruder.lon),
         )
 
         # Convert back to array to allow element-wise array multiplications later on
@@ -236,14 +195,14 @@ class ConflictDetection(core.Entity, replaceable=True):
         dy = dist * np.cos(qdrrad)  # is pos j rel to i
 
         # Ownship track angle and speed
-        owntrkrad = np.radians(trk)
-        ownu = gs * np.sin(owntrkrad).reshape((1, n))  # m/s
-        ownv = gs * np.cos(owntrkrad).reshape((1, n))  # m/s
+        owntrkrad = np.radians(ownship.trk)
+        ownu = ownship.gs * np.sin(owntrkrad).reshape((1, n))  # m/s
+        ownv = ownship.gs * np.cos(owntrkrad).reshape((1, n))  # m/s
 
         # Intruder track angle and speed
-        inttrkrad = np.radians(trk)
-        intu = gs * np.sin(inttrkrad).reshape((1, n))  # m/s
-        intv = gs * np.cos(inttrkrad).reshape((1, n))  # m/s
+        inttrkrad = np.radians(intruder.trk)
+        intu = intruder.gs * np.sin(inttrkrad).reshape((1, n))  # m/s
+        intv = intruder.gs * np.cos(inttrkrad).reshape((1, n))  # m/s
 
         du = ownu - intu.T  # Speed du[i,j] is perceived eastern speed of i to j
         dv = ownv - intv.T  # Speed dv[i,j] is perceived northern speed of i to j
@@ -275,9 +234,9 @@ class ConflictDetection(core.Entity, replaceable=True):
         # Vertical conflict --------------------------------------------------------
 
         # Vertical crossing of disk (-dh,+dh)
-        dalt = alt.reshape((1, n)) - alt.reshape((1, n)).T + 1e9 * I
+        dalt = ownship.alt.reshape((1, n)) - intruder.alt.reshape((1, n)).T + 1e9 * I
 
-        dvs = vs.reshape(1, n) - vs.reshape(1, n).T
+        dvs = ownship.vs.reshape(1, n) - intruder.vs.reshape(1, n).T
         dvs = np.where(np.abs(dvs) < 1e-6, 1e-6, dvs)  # prevent division by zero
 
         # Check for passing through each others zone
@@ -306,7 +265,7 @@ class ConflictDetection(core.Entity, replaceable=True):
         # --------------------------------------------------------------------------
         # Ownship conflict flag and max tCPA
         inconf = np.any(swconfl, 1)
-        tcpamax = np.nanmax(tcpa * swconfl, 1)
+        tcpamax = np.max(tcpa * swconfl, 1)
 
         # Select conflicting pairs: each a/c gets their own record
         confpairs = [(traf.id[i], traf.id[j]) for i, j in zip(*np.where(swconfl))]
@@ -330,7 +289,7 @@ class ConflictDetection(core.Entity, replaceable=True):
     # --------------------------------------------------------------------
 
     @stack.command(name="ADSBZONE")
-    def setrpz(self, radius: float = -1.0, *acidx: "acid"):  # type: ignore
+    def setrpz(self, radius: float = -1.0, *acidx: "acid") -> tuple[bool, str]:  # type: ignore
         """
         Set the vertical/horizontal separation distance (i.e., the radius of the
         protected zone) in nautical miles.
@@ -341,25 +300,51 @@ class ConflictDetection(core.Entity, replaceable=True):
           Otherwise the PZ radius for the passed aircraft is changed.
         """
 
-        pass
+        if radius < 0.0:
+            return (
+                True,
+                f"ADSBZONE [radius(nm), acid]\nCurrent default PZ radius: {self.rpz_def / nm:.2f} NM",
+            )
+        if len(acidx) > 0:
+            if isinstance(acidx[0], np.ndarray):
+                acidx = acidx[0]  # type:ignore
+            self.rpz[acidx] = radius * nm
+            self.global_rpz = False
+            return True, f"Setting PZ radius to {radius} NM for {len(acidx)} aircraft"
+        oldradius = self.rpz_def
+        self.rpz_def = radius * nm
+        if self.global_rpz:
+            self.rpz[:] = self.rpz_def
+
+        return True, f"Setting default PZ radius to {radius} NM"
 
     @stack.command(name="ADSBCD", brief="ADSBCD flag")
-    def cd_selection(self, flag: str = ""):
+    def selection(self, flag: str = "") -> tuple[bool, str]:
         """
         Turn ON/OFF the Conflict Detection methods for ADS-B data.
         """
 
-        # Convert string to bool if provided, else keep None
-        bool_flag = None if flag is "" else flag.lower() in ("1", "true", "yes", "on")
-        self.cd_flag = not self.cd_flag if bool_flag is None else bool_flag
+        if flag == "":
+            # No argument: flip current state
+            self.flag = not self.flag
+        else:
+            f = flag.lower()
+            if f == "true":
+                self.flag = True
+            elif f == "false":
+                self.flag = False
+            else:
+                return False, "Flag must be True or False."
 
-        return True, f"Conflict Detection for ADS-B is {self.cd_flag}."
+        state = "ON" if self.flag else "OFF"
+        return True, f"Conflict Detection for ADS-B is {state}."
 
     @stack.command(name="ADSBDTLOOK", brief="ADSBDTLOOK [time],[acid]")
-    def setdtlook(self, time: "time" = -1.0, *acidx: "acid"):  # type: ignore
+    def setdtlook(self, time: "time" = -1.0, *acidx: "acid") -> tuple[bool, str]:  # type: ignore
         """
         Set the lookahead time (in [hh:mm:]sec) for conflict detection.
         """
+
         if time < 0.0:
             return (
                 True,

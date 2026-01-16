@@ -19,7 +19,7 @@ TODO:
 LOG_UPDATE = 1  # Update dt for LOG [s]
 
 
-class ADSBlog(core.Entity):
+class Logger(core.Entity):
     """
     Class that implements data loggers.
     """

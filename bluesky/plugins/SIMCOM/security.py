@@ -1,14 +1,8 @@
-import numpy as np
-import pyModeS as pms
-from bluesky import (
-    core,
-    stack,
-    traf,
-)  # , settings, navdb, sim, scr, tools
 import os
+import pyModeS as pms
 from dataclasses import dataclass, fields, field
 from cryptography.hazmat.primitives.ciphers.aead import AESGCM
-import bluesky.plugins.SIMCOM.adsb_encoder as encoder
+from bluesky import core, stack, traf
 from bluesky.plugins.SIMCOM.tools import id2idx
 
 """
@@ -16,9 +10,6 @@ This module should implement two encryption/authentication schemes.
 
 One is for AES-CGM. Each aircraft has a key, the same key is owned by the GUI which decode each message.
 The other might be TESLA or something.
-
-TODO:
-- When refactoring with timers, change nonce management
 """
 
 
@@ -30,7 +21,7 @@ class Nonces:
     velocity: bytes = field(default_factory=bytes)
 
 
-class ADSBsecurity(core.Entity):
+class Security(core.Entity):
     """
     Class that implements cyber-defense mechanisms on ADS-B data.
     """
@@ -42,7 +33,7 @@ class ADSBsecurity(core.Entity):
 
         super().__init__()
 
-        self.security_str = "AES-GCM, OFF"  # List of implemented schemes
+        self.security_str = "AES-GCM, ON, OFF"  # List of implemented schemes
         self.flag = False  # Module ON/OFF flag
 
         # Create arrays for the attack arguments and attack type
@@ -83,7 +74,7 @@ class ADSBsecurity(core.Entity):
         In real world this does not exist
         """
 
-        self.apply_AESGCM(msgs, index)
+        return self.apply_AESGCM(msgs, index)
 
     # --------------------------------------------------------------------
     #                      AES-GCM
@@ -134,6 +125,8 @@ class ADSBsecurity(core.Entity):
             # Update the message storing msg, tag and nonce
             setattr(msgs, msg_type, [full_msg, tag, nonce])
 
+        return msgs
+
     def AESGCM_check_nonce(self, nonce, cached_nonce) -> bool:
         """
         Compare the given nonce with the last stored nonce for aircraft i.
@@ -155,14 +148,16 @@ class ADSBsecurity(core.Entity):
         Returns decrypted payload as bytes, or None if CRC/authentication fails.
         """
 
+        if len(msg) != 3:
+            return [""]
+
         cached_nonce = getattr(self.nonces[i], msg_type)
         nonce = msg[2]
 
-        # TODO: Because I am iterating over sigle messages, I can cache only last nonce
+        # TODO: Because I am iterating over single messages, I can cache only last nonce
         if not self.AESGCM_check_nonce(nonce, cached_nonce):
             # If old message, drop it and quit
-            msg[:] = [""]
-            return
+            return [""]
         else:
             # Else update nonce cache
             setattr(self.nonces[i], msg_type, nonce)
@@ -182,9 +177,9 @@ class ADSBsecurity(core.Entity):
         # Decrypt
         try:
             plaintext = self.model[i].decrypt(nonce, ct, aad)  # type:ignore
-            msg[:] = [(aad + plaintext + crc).hex().upper()]
+            return [(aad + plaintext + crc).hex().upper()]
         except Exception:
-            msg[:] = [""]
+            return [""]
 
     # --------------------------------------------------------------------
     #                      STACK FUNCTIONS
