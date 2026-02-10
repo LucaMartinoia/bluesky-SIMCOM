@@ -46,9 +46,11 @@ MAX_NCONFLICTS = 2500
 FLASH_MULT = 2  # The multiplier for the danger flashes
 
 palette.set_default_colours(
-    ADSBaircraft=(0, 255, 0),
-    ADSBconflict=(255, 160, 0),
-    ADSBdanger=(255, 0, 0),
+    ADSBaircraft=(0, 255, 0),  # green: normal
+    ADSBconflict=(255, 170, 0),  # amber: caution
+    ADSBdanger=(255, 0, 0),  # red: immediate danger
+    ADSBspoofing=(255, 255, 0),  # yellow: suspicious / untrusted
+    ADSBattack=(255, 0, 255),  # magenta: hostile / cyber
 )
 
 
@@ -269,7 +271,9 @@ class ADSBview(RenderObject, layer=101):
                 data.ss,
                 data.gt_lat,
                 data.gt_lon,
+                data.attack,
             )
+
             for i, (
                 acid,
                 callsign,
@@ -284,6 +288,7 @@ class ADSBview(RenderObject, layer=101):
                 ss,
                 gt_lat,
                 gt_lon,
+                attackflag,
             ) in enumerate(zdata):
 
                 if i >= MAX_NAIRCRAFT:
@@ -349,6 +354,7 @@ class ADSBview(RenderObject, layer=101):
 
                     # If in conflict, compute CPA lines
                     if inconf:
+                        # Overwrite default colors
                         color[i, :] = palette.conflict + (255,)  # type:ignore
                         lblcolor[i, :] = palette.conflict + (255,)  # type:ignore
                         lat1, lon1 = geo.qdrpos(
@@ -374,6 +380,15 @@ class ADSBview(RenderObject, layer=101):
                             gt_lat,
                             gt_lon,
                         ]
+
+                    # TODO: add same-ICAO color map.
+
+                    if attackflag:
+                        # Attack color
+                        rgba = palette.ADSBattack + (255,)  # type: ignore
+                        color[i, :] = rgba
+                        lblcolor[i, :] = rgba
+                        self.current_color[i] = color[i]
 
             # Update buffers
             self.lat.update(np.array(data.lat, dtype=np.float32))

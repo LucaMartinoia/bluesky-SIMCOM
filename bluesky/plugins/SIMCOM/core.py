@@ -1,39 +1,38 @@
-import csv
-from datetime import datetime
-from types import SimpleNamespace
-from bluesky import core, stack, traf, sim, settings
+import numpy as np
+from bluesky import core, stack, traf, settings
 from bluesky.network.publisher import state_publisher
 from bluesky.plugins.SIMCOM.attacker import Attacker
 from bluesky.plugins.SIMCOM.conflict_detection import ConflictDetection
 from bluesky.plugins.SIMCOM.security import Security
 from bluesky.plugins.SIMCOM.receivers import Receivers
 from bluesky.plugins.SIMCOM.aircraft import Aircraft
+from bluesky.plugins.SIMCOM.datalogger import Logger
+from bluesky.plugins.SIMCOM.physical_layer import PhysicalLayer
+from bluesky.tools import areafilter
 
 """
 SIMCOM is a BlueSky plugin that adds ADS-B-specific functionality, providing tools to analyze
 the impact of cyber-attacks and evaluate cyber-security measures in air traffic systems.
 
 TODO:
-- Data Logger.
 - Network-level structure: add attacker and receiver node positions.
 - Add white Gaussian noise (GNSS noise) to the position/velocity readings.
-- Consider changing attack implementation.
 - Implement other attack types (surveillance, icao).
-- Refactor update to work with Timers (change Nonce management).
-- Refactor @publisher to work with Signals inside update.
-- Move everything inside BlueSky, not a plugin anymore [reset GHOSTS at each update].
+- Refactor update to work with Timers (change Nonce management and add even/odd message caching in ADS-B In).
+- Move everything inside BlueSky, not a plugin anymore.
 - Create ADS-B based conflict resolution method.
-- Fix bugs in ADS-B encoding.
+- Fix bugs and refactor ADS-B encoding.
 - Add toggle to move detection from ground to aircraft (TCAS-like)
-- Modify method to work with data gathered from self.receivers.
-- Move ADS-B view to be based on ICAO instead of ACID
-- Shown velocity is GS and not CAS
-- Publisher for using ICAO instead of traf.id
+
+
+Consider removing Entity from Receivers and Attackers (not Singletons) and allow core.py to own multiple instances of
+Attackers and Receivers, each with its own ADS-B In/Out. In particular, civilRecevier and militaryReceiver.
 """
 
 ACUPDATE_RATE = 2  # Update rate of aircraft update messages [Hz]
 UPDATE = 0.5  # Update dt for ADS-B messages [s]
-LOG_UPDATE = 1  # Update dt for LOG [s]
+
+settings.set_variable_defaults(log_update=1)
 
 
 def init_plugin():
@@ -75,11 +74,11 @@ class Traffic(core.Entity):
     def __init__(self) -> None:
         super().__init__()
 
-        # Data logging variables
-        # TODO: Remove
-        self.log = SimpleNamespace(flag=False)
         # Timers for CD and CR
         self.asastimer = core.Timer(name="adsb_asas", dt=settings.asas_dt)
+
+        self.logger = Logger()
+        self.phys_layer = PhysicalLayer()
 
         with self.settrafarrays():
             # Global traffic entities
@@ -107,6 +106,9 @@ class Traffic(core.Entity):
         Iterates over all aircraft to compute ADS-B messages, apply attacks and decode.
         """
 
+        # Precompute the detection mask
+        # atk_mask, rx_mask = self.phys_layer.detection_masks()
+
         # Compute ADS-B messages for all aircraft
         for i in range(traf.ntraf):
 
@@ -126,7 +128,8 @@ class Traffic(core.Entity):
             else:
                 if self.attacker.flag:
                     # Empty again GHOST aircraft traffic attributes, just in case
-                    self.attacker.empty_aircraft_attributes(i)
+                    if not np.isnan(traf.lat[i]):
+                        self.attacker.empty_aircraft_attributes(i)
                     # Emit GHOST ADS-B messages
                     msgs = self.attacker.emit_ghost(i)
 
@@ -195,6 +198,10 @@ class Traffic(core.Entity):
         data["vs"] = self.receivers.adsbin.vs
         data["trk"] = self.receivers.adsbin.trk
 
+        # Attack and spoofing-related
+        data["attack"] = self.receivers.detatk
+        data["spoofing"] = self.receivers.spoofing_map
+
         # Conflict detection data
         data["rpz"] = self.cd.rpz
         data["inconf"] = self.cd.inconf
@@ -202,90 +209,10 @@ class Traffic(core.Entity):
 
         return data
 
-    # --------------------------------------------------------------------
-    #                      STACK COMMANDS
-    # --------------------------------------------------------------------
-
-    @stack.command(name="ADSBLOG", brief="ADSBLOG fname")
-    def data_logger(self, fname: str = "SIMCOM") -> tuple[bool, str]:  # TODO: remove!
+    @core.timed_function(dt=settings.log_update)
+    def logging(self):
         """
-        Create the CSV file for the logging.
+        Save data.
         """
 
-        # If the flag is False, create file and enable logging
-        if not self.log.flag:
-            timestamp = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
-            fname = f"{fname}_{timestamp}.csv"
-            self.log.fname = f"output/{fname}"
-
-            with open(self.log.fname, mode="a", newline="") as f:
-                writer = csv.writer(f)
-                # Write header only once
-                writer.writerow(
-                    [
-                        "sim.t",
-                        "traf.id",
-                        "traf.lat",
-                        "traf.lon",
-                        "traf.alt",
-                        "traf.gsnorth",
-                        "traf.gseast",
-                        "traf.perf.fuelflow",
-                        "adsb.callsign",
-                        "adsb.lat",
-                        "adsb.lon",
-                        "adsb.alt",
-                        "adsb.gsnorth",
-                        "adsb.gseast",
-                        "adsb.msg",
-                        "adsb.attack.type",
-                        "adsb.sharedair.role",
-                        "adsb.cd.confpairs",
-                        "adsb.cd.dcpa",
-                    ]
-                )
-
-            # Enable logging
-            self.log.flag = True
-            return True, f"Saving data in {fname}..."
-        else:
-            # If the flag is True, stop logging
-            self.log.flag = False
-            self.log.fname = ""
-            return True, "Data logging has stopped."
-
-    @core.timed_function(dt=LOG_UPDATE)
-    def log_data(self) -> None:
-        """
-        Logs the data in log.fname every LOG_UPDATE seconds.
-        """
-
-        # If logging is enabled, save a new row every dt seconds
-        if self.log.flag:
-            with open(self.log.fname, mode="a", newline="") as f:
-                writer = csv.writer(f)
-                writer.writerow(
-                    [
-                        sim.simt,
-                        traf.id,
-                        traf.lat,
-                        traf.lon,
-                        traf.alt,
-                        traf.gsnorth,  # type:ignore
-                        traf.gseast,  # type:ignore
-                        traf.perf.fuelflow,  # type:ignore
-                        self.callsign,
-                        self.lat,
-                        self.lon,
-                        self.altbaro,
-                        self.gsnorth,
-                        self.gseast,
-                        self.msg,
-                        self.attacker.type,
-                        self.sharedair.role,
-                        self.cd.confpairs,
-                        self.cd.dcpa,
-                    ]
-                )
-        else:
-            return
+        self.logger.logging(self.attacker, self.receivers, self.cd)

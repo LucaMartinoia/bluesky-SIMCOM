@@ -1,10 +1,10 @@
-from bluesky import core, traf, stack
-from bluesky.network.publisher import state_publisher
+from bluesky import core
 from bluesky.plugins.SIMCOM.adsbin import ADSBin
 from dataclasses import fields
+from types import SimpleNamespace
 
 """
-This module should implement receivers decoding in SIMCOM.
+This module implements receivers decoding ADS-B messages.
 """
 
 
@@ -14,34 +14,36 @@ class Receivers(core.Entity):
     """
 
     def __init__(self, security) -> None:
-        """
-        Initializing the receiver class.
-        """
-
         super().__init__()
 
         # Global reference to security structure
         self.security = security
 
+        self.spoofing_map = dict()
+
         # Ground-receivers ADS-B In
         with self.settrafarrays():
             # Owns ADS-B In
             self.adsbin = ADSBin()
+            # Attack detected flag
+            self.detatk: list[bool] = []
 
     def create(self, n: int = 1) -> None:
         """
-        When new aircraft are created, they are appended with a new field that stores
-        the cyber-attack parameters.
+        Called when aircraft are created.
         """
-
         super().create(n)
 
-    def decode(self, msgs, index):
+        self.detatk[-n:] = [False] * n
+
+    def decode(self, msgs, index: int) -> None:
         """
-        Decode ADS-B messages for aircraft i, using the
+        Decode ADS-B messages for aircraft, using the
         appropriate security scheme.
         """
-        scheme = self.security.scheme[index]
+        scheme = self.security.scheme[index] if self.security.flag else "NONE"
+
+        atkflag = SimpleNamespace()
 
         for f in fields(msgs):
             msg_type = f.name
@@ -60,10 +62,10 @@ class Receivers(core.Entity):
                         msg, index, msg_type
                     )
                     setattr(msgs, msg_type, plaintext)
-                    if not plaintext:
-                        stack.stack(
-                            f"ECHO {self.adsbin.callsign[index]} under cyber-attack."
-                        )
+
+                    # If decodying fails due to cyber-attack
+                    flag = True if not plaintext[0] else False
+                    setattr(atkflag, msg_type, flag)
 
                 elif scheme == "NONE":
                     # Skip if no security
@@ -74,86 +76,42 @@ class Receivers(core.Entity):
                         f"ADS-B security scheme '{scheme}' not supported."
                     )
 
+        # Save cyber-attack flag
+        self.detatk[index] = any(vars(atkflag).values())
         # Decode plaintext ADS-B message
         self.adsbin.decode_plaintext(msgs, index)
 
-    # --------------------------------------------------------------------
-    #                      TODO: PUBLISHER FOR GUI
-    # --------------------------------------------------------------------
+        # If attack, reset all counters to zero so aircraft is not hidden
+        if self.detatk[index]:
+            self.reset_counters(index)
 
-    # @state_publisher(topic="ADSBDATA", dt=500)
-    def send_ADSB_data(self):
+        # Finally, check for spoofing
+        self.check_icao_spoofing(index)
+
+    def reset_counters(self, index) -> None:
         """
-        Broadcast ADS-B data to the GPU for displaying.
-
-        Data are indexed by unique ICAO address, not by simulation aircraft id.
-
-        TODO: The function is not working right now, but potentially useful for later.
+        Reset all counters to zero.
         """
 
-        data = {}
+        counters = self.adsbin.stale_counters[index]
 
-        icao, callsign, lat, lon, alt, gs, vs, trk, ss = self.aggregate_by_icao()
+        for f in fields(counters):
+            setattr(counters, f.name, 0)
 
-        # ADS-B decoded data
-        data["icao"] = icao
-        data["callsign"] = callsign
-        data["lat"] = lat
-        data["lon"] = lon
-        data["alt"] = alt
-        data["gs"] = gs
-        data["vs"] = vs
-        data["trk"] = trk
-        data["ss"] = ss
-
-        # Ground truth positions
-        data["gt_lat"] = traf.lat
-        data["gt_lon"] = traf.lon
-
-        return data
-
-    def aggregate_by_icao(self):
+    def check_icao_spoofing(self, index: int) -> None:
         """
-        Aggregate decoded ADS-B data by unique ICAO address.
-        For each ICAO, take the first available representative.
+        Check whether the ICAO of aircraft `index` has already
+        appeared. If so, mark all involved aircraft as spoofed.
         """
 
-        seen = {}
-        for i, icao in enumerate(self.icao):
-            if not icao:
-                continue  # skip unknown ICAO
-            if icao not in seen:
-                seen[icao] = i
+        # Gather current ICAO
+        icao = self.adsbin.icao[index]
+        if not icao:
+            return  # unknown ICAO, ignore
 
-        icao_u = []
-        callsign_u = []
-        lat_u = []
-        lon_u = []
-        alt_u = []
-        gs_u = []
-        vs_u = []
-        trk_u = []
-        ss_u = []
-
-        for icao, i in seen.items():
-            icao_u.append(icao)
-            callsign_u.append(self.callsign[i])
-            lat_u.append(self.lat[i])
-            lon_u.append(self.lon[i])
-            alt_u.append(self.alt[i])
-            gs_u.append(self.gs[i])
-            vs_u.append(self.vs[i])
-            trk_u.append(self.trk[i])
-            ss_u.append(self.ss[i])
-
-        return (
-            icao_u,
-            callsign_u,
-            lat_u,
-            lon_u,
-            alt_u,
-            gs_u,
-            vs_u,
-            trk_u,
-            ss_u,
-        )
+        if icao not in self.spoofing_map:
+            # First time we see this ICAO
+            self.spoofing_map[icao] = [index]
+        else:
+            # ICAO already seen: spoofing detected
+            self.spoofing_map[icao].append(index)

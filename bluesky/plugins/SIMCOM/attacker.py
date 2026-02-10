@@ -22,7 +22,7 @@ class Attacker(core.Entity):
 
         # List of implemented commands
         self.command_str = (
-            "FREEZE, HIDE, JUMP, MGHOST, GHOST, CONFGHOST, NONE, STATUS, RESET, ON, OFF"
+            "FREEZE, HIDE, JUMP, MGHOST, GHOST, CONFGHOST, NONE, STATUS, RESET, TOGGLE"
         )
         self.flag = True  # Module ON/OFF flag
 

@@ -6,10 +6,7 @@ from bluesky import core, stack, traf
 from bluesky.plugins.SIMCOM.tools import id2idx
 
 """
-This module should implement two encryption/authentication schemes.
-
-One is for AES-CGM. Each aircraft has a key, the same key is owned by the GUI which decode each message.
-The other might be TESLA or something.
+This module implements two encryption/authentication schemes.
 """
 
 
@@ -27,13 +24,11 @@ class Security(core.Entity):
     """
 
     def __init__(self) -> None:
-        """
-        Initializing the security class.
-        """
-
         super().__init__()
 
-        self.security_str = "AES-GCM, ON, OFF"  # List of implemented schemes
+        self.security_str = (
+            "AES-GCM, NONE, STATUS, TOGGLE"  # List of implemented schemes
+        )
         self.flag = False  # Module ON/OFF flag
 
         # Create arrays for the attack arguments and attack type
@@ -68,10 +63,7 @@ class Security(core.Entity):
 
     def apply_schemes(self, msgs, index: int):
         """
-        This function is called in protocol.py.
-
-        msg_type is only used to store values in the appropriate cache.
-        In real world this does not exist
+        Wrapper function for the AES-GCM encryption scheme.
         """
 
         return self.apply_AESGCM(msgs, index)
@@ -83,14 +75,17 @@ class Security(core.Entity):
     def apply_AESGCM(self, msgs, index: int):
         """
         Encrypts the message using AES-GCM.
+
+        Called from aircraft.
         """
 
         # Loop over all message types
         for f in fields(msgs):
             msg_type = f.name
             msg = getattr(msgs, msg_type)
+            # Skip empty messages at aircraft
             if not msg:
-                continue  # skip empty messages
+                continue
 
             # Compute the nonce from counter and random
             nonce = os.urandom(8) + self.counter[index].to_bytes(4, "big")
@@ -127,7 +122,7 @@ class Security(core.Entity):
 
         return msgs
 
-    def AESGCM_check_nonce(self, nonce, cached_nonce) -> bool:
+    def AESGCM_check_nonce(self, nonce: bytes, cached_nonce: bytes) -> bool:
         """
         Compare the given nonce with the last stored nonce for aircraft i.
         Returns True if nonce is valid (counter > last), False otherwise.
@@ -142,10 +137,12 @@ class Security(core.Entity):
 
         return True
 
-    def decrypt_AESGCM_message(self, msg: list, i: int, msg_type: str):
+    def decrypt_AESGCM_message(self, msg: list, i: int, msg_type: str) -> list:
         """
         Decrypts a single ADS-B hex message using AES-GCM.
-        Returns decrypted payload as bytes, or None if CRC/authentication fails.
+        Returns decrypted payload as bytes, or [""] if CRC/authentication fails.
+
+        Called from receiver.
         """
 
         if len(msg) != 3:
@@ -169,7 +166,7 @@ class Security(core.Entity):
         aad = msg_bytes[:4]
         payload = msg_bytes[4:-3]
         crc = msg_bytes[-3:]
-        tag = msg[1]  # Already in bytes
+        tag = msg[1]  # already in bytes
 
         # Append stored tag
         ct = payload + tag
@@ -186,7 +183,7 @@ class Security(core.Entity):
     # --------------------------------------------------------------------
 
     @stack.commandgroup(name="SECURITY", brief="SECURITY commands [args]")
-    def security(self):
+    def security(self) -> tuple[bool, str]:
         """
         Cyber-security related commands.
         """
@@ -194,9 +191,11 @@ class Security(core.Entity):
         return True, f"SECURITY command\nPossible subcommands: {self.security_str}."
 
     @security.subcommand(name="AES-GCM", brief="AES-GCM [acid]")
-    def security_AESGCM(self, acid: str = ""):
+    def security_AESGCM(self, acid: str = "") -> tuple[bool, str]:
         """
         AES-CGM scheme used by selected aircraft.
+
+        If no ACID is provided, the scheme is applied to all aircraft instead.
         """
 
         if acid != "":
@@ -217,32 +216,38 @@ class Security(core.Entity):
 
             return True, f"All aircraft are using AES-GCM scheme."
 
-    @security.subcommand(name="NONE", brief="NONE acid")
-    def security_none(self, acid: "acid"):  # type: ignore
+    @security.subcommand(name="NONE", brief="NONE [acid]")
+    def security_none(self, acid: str = "") -> tuple[bool, str]:
         """
         No security scheme used by selected aircraft.
+
+        If no ACID is provided, the scheme is applied to all aircraft instead.
         """
 
         # Reset fields
         if acid:
-            self.scheme[acid] = "NONE"
-            self.model[acid] = None
-            self.data[acid] = {}
-            self.keyring[acid] = b""
-            self.counter[acid] = 0
+            i = id2idx(acid)
+            if i == -1:
+                return False, "Aircraft does not exists."
+            else:
+                # For single aircraft
+                self.scheme[i] = "NONE"
+                self.model[i] = None
+                self.keyring[i] = b""
+
+                return True, f"{traf.id[i]} is not using any security schemes."
         else:
+            # For all.
             n = traf.ntraf
 
             self.scheme = ["NONE"] * n
             self.model = [None] * n
-            self.data = [{} for _ in range(n)]
             self.keyring = [b""] * n
-            self.counter = [0] * n
 
-        return True, f"{traf.id[acid]} is not using any security schemes."
+            return True, f"All aircfaft stopped using security schemes."
 
     @security.subcommand(name="STATUS", brief="STATUS acid")
-    def security_status(self, acid: "acid"):  # type: ignore
+    def security_status(self, acid: "acid") -> tuple[bool, str]:  # type: ignore
         """
         Show current attack status for a given aircraft.
         """
@@ -252,20 +257,23 @@ class Security(core.Entity):
             f"Aircraft {traf.id[acid]} is using {self.scheme[acid]} scheme.",
         )
 
-    @security.subcommand(name="OFF", brief="OFF")
-    def security_off(self):
+    @security.subcommand(name="TOGGLE", brief="TOGGLE [flag]")
+    def attack_on(self, flag: str = "") -> tuple[bool, str]:
         """
-        Disable the security module.
-        """
-
-        self.flag = False
-        return True, "SECURITY module is OFF."
-
-    @security.subcommand(name="ON", brief="ON")
-    def security_on(self):
-        """
-        Enable the security module.
+        Enable/disable module.
         """
 
-        self.flag = True
-        return True, "SECURITY module is ON."
+        if flag == "":
+            # No argument: flip current state
+            self.flag = not self.flag
+        else:
+            f = flag.lower()
+            if f == "true":
+                self.flag = True
+            elif f == "false":
+                self.flag = False
+            else:
+                return False, "Flag must be 'true' or 'false'."
+
+        state = "ON" if self.flag else "OFF"
+        return True, f"Attack module {state}."

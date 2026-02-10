@@ -26,6 +26,8 @@ class Aircraft(core.Entity):
             # Military aircraft
             self.sharedair = SharedAirspace()
 
+            self.last_fired = []
+
     def create(self, n: int = 1) -> None:
         """
         This function gets called automatically
@@ -33,6 +35,8 @@ class Aircraft(core.Entity):
         """
 
         super().create(n)
+
+        self.last_fired[-n:] = [""] * n
 
     def emit_msgs(self, index: int):
         """

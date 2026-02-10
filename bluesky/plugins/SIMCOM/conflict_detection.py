@@ -288,7 +288,7 @@ class ConflictDetection(core.Entity, replaceable=True):
     #                      STACK FUNCTIONS
     # --------------------------------------------------------------------
 
-    @stack.command(name="ADSBZONE")
+    @stack.command(name="ADSBZONE", brief="ADSBZONE radius,acid")
     def setrpz(self, radius: float = -1.0, *acidx: "acid") -> tuple[bool, str]:  # type: ignore
         """
         Set the vertical/horizontal separation distance (i.e., the radius of the
@@ -318,7 +318,7 @@ class ConflictDetection(core.Entity, replaceable=True):
 
         return True, f"Setting default PZ radius to {radius} NM"
 
-    @stack.command(name="ADSBCD", brief="ADSBCD flag")
+    @stack.command(name="ADSBCD", brief="ADSBCD [flag]")
     def selection(self, flag: str = "") -> tuple[bool, str]:
         """
         Turn ON/OFF the Conflict Detection methods for ADS-B data.
