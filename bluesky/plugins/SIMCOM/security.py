@@ -40,6 +40,7 @@ class Security(core.Entity):
             # Nonce counter
             self.counter = []
             # Cached nonces at receiver
+            # TODO: refactor nonces so they are stored inside receiver?
             self.nonces = []
 
     def create(self, n: int = 1) -> None:
@@ -50,7 +51,7 @@ class Security(core.Entity):
 
         super().create(n)
 
-        # Empty NONE schemes for newly created aircraft
+        # Empty fields for newly created aircraft
         self.scheme[-n:] = ["NONE"] * n
         self.model[-n:] = [None] * n
         self.counter[-n:] = [1] * n
@@ -61,7 +62,7 @@ class Security(core.Entity):
     #                      SECURITY SCHEMES
     # --------------------------------------------------------------------
 
-    def apply_schemes(self, msgs, index: int):
+    def apply_schemes(self, msgs, index: int) -> None:
         """
         Wrapper function for the AES-GCM encryption scheme.
         """
@@ -72,7 +73,7 @@ class Security(core.Entity):
     #                      AES-GCM
     # --------------------------------------------------------------------
 
-    def apply_AESGCM(self, msgs, index: int):
+    def apply_AESGCM(self, msgs, index: int) -> None:
         """
         Encrypts the message using AES-GCM.
 
@@ -83,7 +84,7 @@ class Security(core.Entity):
         for f in fields(msgs):
             msg_type = f.name
             msg = getattr(msgs, msg_type)
-            # Skip empty messages at aircraft
+            # Skip empty messages
             if not msg:
                 continue
 
@@ -140,7 +141,7 @@ class Security(core.Entity):
     def decrypt_AESGCM_message(self, msg: list, i: int, msg_type: str) -> list:
         """
         Decrypts a single ADS-B hex message using AES-GCM.
-        Returns decrypted payload as bytes, or [""] if CRC/authentication fails.
+        Returns decrypted payload as bytes, or [""] if authentication fails.
 
         Called from receiver.
         """
@@ -276,4 +277,4 @@ class Security(core.Entity):
                 return False, "Flag must be 'true' or 'false'."
 
         state = "ON" if self.flag else "OFF"
-        return True, f"Attack module {state}."
+        return True, f"Security module {state}."

@@ -1,4 +1,5 @@
 import numpy as np
+from types import SimpleNamespace
 from bluesky import stack, traf, settings, core
 from bluesky.tools import geo
 from bluesky.tools.aero import nm, ft
@@ -103,6 +104,27 @@ class ConflictDetection(core.Entity, replaceable=True):
         self.global_rpz = self.global_hpz = True
         self.global_dtlook = self.global_dtnolook = True
 
+    def gather_data(self, ownship, intruder, index):
+        """
+        Extract data for a given receiver index.
+        """
+
+        fields = ["lat", "lon", "trk", "gs", "vs", "alt", "callsign"]
+
+        # Helper to extract index-th element from each sublist of a given attribute
+        def extract(obj, field):
+            attr = getattr(obj, field)
+            # For callsign, we assume it's string, just wrap in array
+            if field == "callsign":
+                return np.array([row[index] for row in attr], dtype=object)
+            else:
+                return np.array([row[index] for row in attr])
+
+        ownship_reduced = SimpleNamespace(**{f: extract(ownship, f) for f in fields})
+        intruder_reduced = SimpleNamespace(**{f: extract(intruder, f) for f in fields})
+
+        return ownship_reduced, intruder_reduced
+
     def update(self, ownship, intruder) -> None:
         """
         Perform an update step of the Conflict Detection implementation.
@@ -170,6 +192,7 @@ class ConflictDetection(core.Entity, replaceable=True):
         """
         Conflict detection between ownship and intruder.
         """
+
         # Identity matrix of order ntraf: avoid ownship-ownship detected conflicts
         n = traf.ntraf
         I = np.eye(n)

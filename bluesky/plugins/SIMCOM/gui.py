@@ -78,6 +78,8 @@ class ADSBview(RenderObject, layer=101):
         self.initialized = False
         # Transition level for altitude labels
         self.translvl = 5000.0 * ft
+        # Receiver view
+        self.view = 0
 
         # Initialize the GPU buffers
         self.hdg = GLBuffer()
@@ -224,6 +226,8 @@ class ADSBview(RenderObject, layer=101):
         # Update the number of AC
         self.naircraft = len(data.id)
         self.translvl = data.translvl
+        # Select point of view
+        self.view = data.view - 1 if data.rxranges else 0
 
         # If there are aircraft
         if self.naircraft == 0:
@@ -256,40 +260,38 @@ class ADSBview(RenderObject, layer=101):
                 new_colors[:copy_count] = self.current_color[:copy_count]
                 self.current_color = new_colors
 
+            # Current view data lists for update
+            lat_update = []
+            lon_update = []
+            trk_update = []
+            alt_update = []
+
             # Loop over all aircraft
             zdata = zip(
                 data.id,
-                data.callsign,
                 data.inconf,
                 data.tcpamax,
-                data.lat,
-                data.lon,
-                data.alt,
-                data.gs,
-                data.vs,
-                data.trk,
-                data.ss,
                 data.gt_lat,
                 data.gt_lon,
-                data.attack,
             )
 
             for i, (
                 acid,
-                callsign,
                 inconf,
                 tcpa,
-                lat,
-                lon,
-                alt,
-                gs,
-                vs,
-                trk,
-                ss,
                 gt_lat,
                 gt_lon,
-                attackflag,
             ) in enumerate(zdata):
+
+                callsign = data.callsign[i][self.view]
+                lat = data.lat[i][self.view]
+                lon = data.lon[i][self.view]
+                alt = data.alt[i][self.view]
+                gs = data.gs[i][self.view]
+                vs = data.vs[i][self.view]
+                trk = data.trk[i][self.view]
+                ss = data.ss[i][self.view]
+                attackflag = data.attack[i][self.view]
 
                 if i >= MAX_NAIRCRAFT:
                     break
@@ -312,7 +314,7 @@ class ADSBview(RenderObject, layer=101):
                         rawlabel += f"{int(gs / kts + 0.5):<3}{chr(vsarrow):<7}"
                     else:
                         # Fallback row: just <acid> plus 30 spaces
-                        rawlabel += f"<{acid[:8]}>".ljust(40)
+                        rawlabel += f"{f'<{acid[:8]}>':<10}" + " " * 30
 
                 if self.show_adsb:
                     # If not in conflict and not in danger, standard colors
@@ -390,11 +392,16 @@ class ADSBview(RenderObject, layer=101):
                         lblcolor[i, :] = rgba
                         self.current_color[i] = color[i]
 
+                lat_update.append(lat)
+                lon_update.append(lon)
+                alt_update.append(alt)
+                trk_update.append(trk)
+
             # Update buffers
-            self.lat.update(np.array(data.lat, dtype=np.float32))
-            self.lon.update(np.array(data.lon, dtype=np.float32))
-            self.hdg.update(np.array(data.trk, dtype=np.float32))
-            self.alt.update(np.array(data.alt, dtype=np.float32))
+            self.lat.update(np.array(lat_update, dtype=np.float32))
+            self.lon.update(np.array(lon_update, dtype=np.float32))
+            self.hdg.update(np.array(trk_update, dtype=np.float32))
+            self.alt.update(np.array(alt_update, dtype=np.float32))
             self.rpz.update(np.array(data.rpz, dtype=np.float32))
             self.joinline.update(vertex=joinlines)
             self.cpalines.update(vertex=cpalines)

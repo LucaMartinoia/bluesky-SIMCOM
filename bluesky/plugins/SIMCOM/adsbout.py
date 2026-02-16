@@ -2,7 +2,7 @@ import pyModeS as pms
 import numpy as np
 from dataclasses import dataclass, field
 from bluesky import core
-from bluesky.tools.aero import kts, ft, a0
+from bluesky.tools.aero import kts, ft, a0, Rearth
 from bluesky.plugins.SIMCOM.tools import hex2bin, bin2hex, int2bin
 
 
@@ -22,10 +22,35 @@ class ADSBmessages:
     identification: list = field(default_factory=lambda: [""])
     velocity: list = field(default_factory=lambda: [""])
 
+    def copy(self):
+        """
+        Create a copy.
+        """
+        return ADSBmessages(
+            position_even=self.position_even.copy(),
+            position_odd=self.position_odd.copy(),
+            identification=self.identification.copy(),
+            velocity=self.velocity.copy(),
+        )
+
+    def has_content(self) -> bool:
+        """
+        Return True if at least one message field is not None.
+        """
+        for lst in [
+            self.position_even,
+            self.position_odd,
+            self.identification,
+            self.velocity,
+        ]:
+            if any(item not in (None, "") for item in lst):
+                return True
+        return False
+
 
 class ADSBout(core.TrafficArrays):
     """
-    Inherits from TrafficArrays instead of Entity because Aircraft and Attacker must own different instances.
+    Inherits from TrafficArrays instead of Entity because Aircraft and Attacker must own different ADSB Out instances.
 
     Because of this, it cannot accept BlueSky decorators like Timers and Stack functions.
     """
@@ -73,36 +98,97 @@ class ADSBout(core.TrafficArrays):
         self.callsign[-n:] = [""] * n
         self.icao[-n:] = [""] * n
 
-    def update_registry(self, reference, index: int) -> None:
+    def get(self, ac_idx: int, rx_idx: int = 0) -> dict:
         """
-        Updates the dynamical variables from a reference container.
+        Get ADS-B data for a specific aircraft.
         """
 
-        # If reference is traf, pass traf.id, else pass callsign
-        self.callsign[index] = (
-            reference.id[index]
-            if hasattr(reference, "id")
-            else reference.callsign[index]
-        )
-        # If callsign assigned, use that, otherwise assign ICAO
+        return {
+            "icao": self.icao[ac_idx],
+            "callsign": self.callsign[ac_idx],
+            "altGNSS": self.altGNSS[ac_idx],
+            "alt": self.alt[ac_idx],
+            "lat": self.lat[ac_idx],
+            "lon": self.lon[ac_idx],
+            "gsnorth": self.gsnorth[ac_idx],
+            "gseast": self.gseast[ac_idx],
+            "gs": self.gs[ac_idx],
+            "vs": self.vs[ac_idx],
+            "trk": self.trk[ac_idx],
+            "capability": self.capability[ac_idx],
+            "ss": self.ss[ac_idx],
+        }
+
+    def update_registry(self, reference, index: int, rx_idx: int = 0) -> None:
+        """
+        Dispatch to appropriate update method.
+        """
+
+        if hasattr(reference, "id"):
+            self.update_from_traf(reference, index)
+        else:
+            self.update_from_adsbin(reference, index)
+
+    def update_from_traf(self, reference, index: int) -> None:
+        """
+        Update registry from traf (plain float/string values).
+        """
+
+        self.callsign[index] = reference.id[index]
         self.icao[index] = self.icao[index] or f"{np.random.randint(0, 0xFFFFFF+1):06X}"
 
-        # Update ADS-B registry
-        noise = np.random.uniform(-65, 65)
+        # Altitude error
+        sigma_alt = 30
+        noise_alt = np.random.normal(0, sigma_alt)
+
+        # Lat/lon error
+        sigma_horiz = 10
+        dx = np.random.normal(0, sigma_horiz)
+        dy = np.random.normal(0, sigma_horiz)
+        lat_rad = np.deg2rad(reference.lat[index])
+        dlat = (dy / Rearth) * (180 / np.pi)
+        dlon = (dx / (Rearth * np.cos(lat_rad))) * (180 / np.pi)
+
+        # Velocity error
+        sigma_v = 0.5
+        dv_n = np.random.normal(0.0, sigma_v)
+        dv_e = np.random.normal(0.0, sigma_v)
+
         self.alt[index] = reference.alt[index]
-        self.altGNSS[index] = np.maximum(reference.alt[index] + noise, 0)
-        self.lat[index] = reference.lat[index]
-        self.lon[index] = reference.lon[index]
-        self.gsnorth[index] = reference.gsnorth[index]
-        self.gseast[index] = reference.gseast[index]
-        self.gs[index] = reference.gs[index]
+        self.altGNSS[index] = np.maximum(reference.alt[index] + noise_alt, 0)
+        self.lat[index] = reference.lat[index] + dlat
+        self.lon[index] = reference.lon[index] + dlon
+        self.gsnorth[index] = reference.gsnorth[index] + dv_n
+        self.gseast[index] = reference.gseast[index] + dv_e
+        self.gs[index] = np.hypot(self.gsnorth[index], self.gseast[index])
         self.vs[index] = reference.vs[index]
-        self.trk[index] = reference.trk[index]
+        self.trk[index] = (
+            np.degrees(np.arctan2(self.gseast[index], self.gsnorth[index]))
+        ) % 360.0
+
+    def update_from_adsbin(self, reference, index: int) -> None:
+        """
+        Update registry from adsbin (list-wrapped values).
+        """
+
+        self.callsign[index] = reference.callsign[index][0]
+        self.icao[index] = reference.icao[index][0]
+
+        self.alt[index] = reference.alt[index][0]
+        self.altGNSS[index] = reference.altGNSS[index][0]
+        self.lat[index] = reference.lat[index][0]
+        self.lon[index] = reference.lon[index][0]
+        self.gsnorth[index] = reference.gsnorth[index][0]
+        self.gseast[index] = reference.gseast[index][0]
+        self.gs[index] = reference.gs[index][0]
+        self.vs[index] = reference.vs[index][0]
+        self.trk[index] = reference.trk[index][0]
 
     def empty_registry(self, index: int) -> None:
         """
         Empty the registry for a given index.
         """
+
         # Update ADS-B registry
         self.alt[index] = np.nan
         self.altGNSS[index] = np.nan
@@ -234,6 +320,7 @@ def append_crc(msg_bin: str) -> str:
 
     Return: the full 112 bit ADS-B message.
     """
+
     msg_hex = bin2hex(msg_bin).zfill(22)  # 88 bits = 22 hex digits
 
     # Append 6 hex zeros (24 bits) for CRC calculation
@@ -264,7 +351,7 @@ def _identification(
 
     # Validate ICAO
     if len(icao) != 6:
-        raise ValueError("ICAO must be 6 hex digits")
+        raise ValueError(f"ICAO must be 6 hex digits, {icao}")
 
     # DF and CA
     df_bin = int2bin(17, 5)  # DF = 17 for ADS-B

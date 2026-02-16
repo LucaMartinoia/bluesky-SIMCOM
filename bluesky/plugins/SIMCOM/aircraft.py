@@ -1,6 +1,7 @@
 from bluesky import core, traf, stack
 from bluesky.plugins.SIMCOM.adsbout import ADSBout
 from bluesky.plugins.SIMCOM.shared_airspace import SharedAirspace
+from bluesky.plugins.SIMCOM.physical_layer import Transmission
 
 
 """
@@ -10,7 +11,7 @@ Module for Aircraft entities in ADS-B traffic.
 
 class Aircraft(core.Entity):
     """
-    Aircraft entities are singleton that own an ADS-B Out.
+    Aircraft entity is a singleton that owns an ADS-B Out.
     """
 
     def __init__(self, security) -> None:
@@ -44,7 +45,6 @@ class Aircraft(core.Entity):
         """
 
         # Aircraft update ADS-B Out registry from GNSS data
-        # TODO: vectorialized version
         self.adsbout.update_registry(traf, index)
 
         if self.security.flag and self.security.scheme[index] != "NONE":
@@ -55,7 +55,14 @@ class Aircraft(core.Entity):
             # Or simple ADS-B messages
             msgs = self.adsbout.encode_msgs(index)
 
-        return msgs
+        return Transmission(msgs=msgs, source_loc=self.loc(index), time=0.0)
+
+    def loc(self, index: int) -> tuple[float, float]:
+        """
+        Return real position of aircraft.
+        """
+
+        return (traf.lat[index], traf.lon[index])
 
     # --------------------------------------------------------------------
     #                      STACK COMMANDS

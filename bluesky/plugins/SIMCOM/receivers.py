@@ -1,3 +1,4 @@
+import numpy as np
 from bluesky import core
 from bluesky.plugins.SIMCOM.adsbin import ADSBin
 from dataclasses import fields
@@ -13,37 +14,43 @@ class Receivers(core.Entity):
     Class that act as ground receivers for the ADS-B messages.
     """
 
-    def __init__(self, security) -> None:
+    def __init__(self, security, loc) -> None:
         super().__init__()
 
         # Global reference to security structure
         self.security = security
+        self.loc = loc if loc else None
+        self.n_rx = max(1, len(loc))
 
         self.spoofing_map = dict()
 
         # Ground-receivers ADS-B In
         with self.settrafarrays():
             # Owns ADS-B In
-            self.adsbin = ADSBin()
+            self.adsbin = ADSBin(self.n_rx)
             # Attack detected flag
-            self.detatk: list[bool] = []
+            self.detatk = []
 
     def create(self, n: int = 1) -> None:
         """
         Called when aircraft are created.
         """
+
         super().create(n)
 
-        self.detatk[-n:] = [False] * n
+        # For each aircraft, save an array of length n_rx
+        for i_ac in range(-n, 0):
+            self.detatk[i_ac] = [False] * self.n_rx
 
-    def decode(self, msgs, index: int) -> None:
+    def decode(self, msgs, i_rx: int, i_ac: int) -> None:
         """
         Decode ADS-B messages for aircraft, using the
         appropriate security scheme.
         """
-        scheme = self.security.scheme[index] if self.security.flag else "NONE"
 
-        atkflag = SimpleNamespace()
+        scheme = self.security.scheme[i_ac] if self.security.flag else "NONE"
+
+        atkflag = None
 
         for f in fields(msgs):
             msg_type = f.name
@@ -59,13 +66,14 @@ class Receivers(core.Entity):
                 if scheme == "AES-GCM":
                     # Decrypt and authenticate before decoding
                     plaintext = self.security.decrypt_AESGCM_message(
-                        msg, index, msg_type
+                        msg, i_ac, msg_type
                     )
                     setattr(msgs, msg_type, plaintext)
 
                     # If decodying fails due to cyber-attack
-                    flag = True if not plaintext[0] else False
-                    setattr(atkflag, msg_type, flag)
+                    atkflag = True if not plaintext[0] else False
+                    if atkflag:
+                        break
 
                 elif scheme == "NONE":
                     # Skip if no security
@@ -77,26 +85,16 @@ class Receivers(core.Entity):
                     )
 
         # Save cyber-attack flag
-        self.detatk[index] = any(vars(atkflag).values())
+        self.detatk[i_ac][i_rx] = atkflag
         # Decode plaintext ADS-B message
-        self.adsbin.decode_plaintext(msgs, index)
+        self.adsbin.decode_plaintext(msgs, i_rx, i_ac)
 
         # If attack, reset all counters to zero so aircraft is not hidden
-        if self.detatk[index]:
-            self.reset_counters(index)
+        if self.detatk[i_ac][i_rx]:
+            self.adsbin.set_counters(i_rx, i_ac, value=0)
 
         # Finally, check for spoofing
-        self.check_icao_spoofing(index)
-
-    def reset_counters(self, index) -> None:
-        """
-        Reset all counters to zero.
-        """
-
-        counters = self.adsbin.stale_counters[index]
-
-        for f in fields(counters):
-            setattr(counters, f.name, 0)
+        # self.check_icao_spoofing(index)
 
     def check_icao_spoofing(self, index: int) -> None:
         """

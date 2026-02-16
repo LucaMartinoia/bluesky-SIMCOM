@@ -23,7 +23,7 @@ class Logger(core.Entity):
         # Initialize loggers
         self.reset()
 
-    def reset(self):
+    def reset(self) -> None:
         """
         Reset all the loggers.
         """
@@ -51,10 +51,11 @@ class Logger(core.Entity):
         # Create an empty DataFrame with the specified columns
         self.df = pd.DataFrame(columns=self.columns)
 
-    def logging(self, attacker, receivers, cd):
+    def logging(self, attacker, receivers, cd) -> None:
         """
         Save data to Dataframe.
         """
+
         if self.flag:
 
             # Conflict detection conflicts and loss of separations
