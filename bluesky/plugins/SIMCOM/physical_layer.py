@@ -1,9 +1,12 @@
+import numpy as np
 from dataclasses import dataclass
+from matplotlib.path import Path
 from typing import Any
 from bluesky.tools import areafilter
 from bluesky.tools.geo import kwikdist
 from bluesky.tools.aero import nm
 from bluesky import core, settings, stack
+from bluesky.network.publisher import StatePublisher
 
 """
 This module should implement transmission noise effects.
@@ -12,6 +15,10 @@ This module should implement transmission noise effects.
 settings.set_variable_defaults(attacker_locations=[], receiver_locations=[])
 
 C = 299702547  # speed of light in air [m/s]
+# Dictionary of all basic shapes (The shape classes defined in this file) by name
+basic_shapes = dict()
+# Publisher object to manage publishing of states to clients
+polypub = StatePublisher("ADSBPOLY", collect=True)
 
 
 @dataclass
@@ -77,20 +84,20 @@ class PhysicalLayer(core.Entity):
             area_name = name_prefix + str(idx)
 
             if len(coords) == 3:
-                areafilter.defineArea(
+                defineArea(
                     name=area_name,
                     shape="CIRCLE",
                     coordinates=coords,
                 )
-                areas.append(areafilter.basic_shapes[area_name])
+                areas.append(basic_shapes[area_name])
 
             elif len(coords) > 6 and len(coords) % 2 == 0:
-                areafilter.defineArea(
+                defineArea(
                     name=area_name,
                     shape="POLY",
                     coordinates=coords,
                 )
-                areas.append(areafilter.basic_shapes[area_name])
+                areas.append(basic_shapes[area_name])
 
             else:
                 print(f"Given '{name_prefix}' areas are not valid.")
@@ -118,7 +125,11 @@ class PhysicalLayer(core.Entity):
         receiver_area = (
             self.attackers[index] if receiver == "atk" else self.receivers[index]
         )
-        receiver_loc = self.atk_loc[index] if receiver == "atk" else self.rx_loc[index]
+        receiver_loc = (
+            (self.attackers[index].clat, self.attackers[index].clon)
+            if receiver == "atk"
+            else (self.receivers[index].clat, self.receivers[index].clon)
+        )
 
         lat_tx, lon_tx = transmission.source_loc
         lat_rx, lon_rx = receiver_loc
@@ -159,7 +170,7 @@ class PhysicalLayer(core.Entity):
             areas = self.attackers + self.receivers
 
         for area in areas:
-            areafilter.colour(area.name, 0, 0, 0)
+            colour(area.name, 0, 0, 0)
 
     def show(self, target: str = "") -> None:
         """
@@ -176,7 +187,7 @@ class PhysicalLayer(core.Entity):
 
         for areas, color in configs:
             for area in areas:
-                areafilter.colour(area.name, *color)
+                colour(area.name, *color)
 
     def highlight(self, rx: int = 0) -> None:
         """
@@ -184,27 +195,7 @@ class PhysicalLayer(core.Entity):
         """
 
         self.hide("RX")
-        areafilter.colour(f"RX{rx}", 0, 255, 200)
-
-    @staticmethod
-    def center(shape: areafilter.Shape) -> tuple[float, float]:
-        """Return the geographic center of a shape.
-
-        - For Circle: returns the center coordinates.
-        - For Poly: returns the midpoint of the bounding box.
-        """
-        if isinstance(shape, areafilter.Circle):
-            return (shape.clat, shape.clon)
-        elif isinstance(shape, areafilter.Poly):
-            clat = 0.5 * (shape.bbox[0] + shape.bbox[2])
-            clon = 0.5 * (shape.bbox[1] + shape.bbox[3])
-            return (clat, clon)
-        elif isinstance(shape, areafilter.Box):
-            clat = 0.5 * (shape.bbox[0] + shape.bbox[2])
-            clon = 0.5 * (shape.bbox[1] + shape.bbox[3])
-            return (clat, clon)
-        else:
-            raise TypeError(f"Unsupported shape type: {type(shape)}")
+        colour(f"RX{rx}", 0, 255, 200)
 
     @stack.command(name="LOADLOC", brief="LOADLOC")
     def load_loc(self) -> tuple[bool, str]:
@@ -215,15 +206,6 @@ class PhysicalLayer(core.Entity):
         # Read geometric locations
         self.attackers = self._parse_areas(settings.attacker_locations, "ATK")
         self.receivers = self._parse_areas(settings.receiver_locations, "RX")
-
-        # Store center locations
-        self.atk_loc = []
-        for atk in self.attackers:
-            self.atk_loc.append(self.center(atk))
-
-        self.rx_loc = []
-        for rx in self.receivers:
-            self.rx_loc.append(self.center(rx))
 
         # How many entities
         self.n_rx = max(1, len(self.receivers))
@@ -269,3 +251,105 @@ class PhysicalLayer(core.Entity):
         # Not a valid POV
         else:
             return False, f"{rx} is not a valid number."
+
+
+@polypub.payload
+def puball():
+    return dict(polys={name: poly.raw for name, poly in basic_shapes.items()})
+
+
+def defineArea(name, shape, coordinates, top=1e9, bottom=-1e9):
+    """
+    Define a new area.
+    """
+    if name == "LIST":
+        if not basic_shapes:
+            return True, "No shapes are currently defined."
+        else:
+            return True, "Currently defined shapes:\n" + ", ".join(basic_shapes)
+    if coordinates is None:
+        if name in basic_shapes:
+            return True, str(basic_shapes[name])
+        else:
+            return False, f"Unknown shape: {name}"
+    elif shape == "CIRCLE":
+        basic_shapes[name] = Circle(name, coordinates, top, bottom)
+    elif shape[:4] == "POLY":
+        basic_shapes[name] = Poly(name, coordinates, top, bottom)
+
+    clat = basic_shapes[name].clat
+    clon = basic_shapes[name].clon
+    # Pass the shape on to the connected clients
+    polypub.send_update(
+        polys={name: dict(shape=shape, coordinates=coordinates, clat=clat, clon=clon)}
+    )
+
+    return True  # , f'Created {shape} {name}'
+
+
+def colour(name, r, g, b):
+    """
+    Set custom color for visual objects.
+    """
+    poly = basic_shapes.get(name)
+    if poly:
+        poly.color = (r, g, b)
+        polypub.send_update(polys={name: dict(color=poly.color)})
+        return True
+    return False, "No shape found with name " + name
+
+
+class Poly(areafilter.Poly):
+    """
+    A polygon shape with center.
+    """
+
+    def __init__(self, name, coordinates, top=1e9, bottom=-1e9):
+        super().__init__(name, coordinates, top, bottom)
+        self.border = Path(np.reshape(coordinates, (len(coordinates) // 2, 2)))
+
+        self.clat, self.clon = self.center()
+
+    def center(self) -> tuple[float, float]:
+        """
+        Return the geographic center of a shape.
+        """
+
+        clat = 0.5 * (self.bbox[0] + self.bbox[2])
+        clon = 0.5 * (self.bbox[1] + self.bbox[3])
+        return (clat, clon)
+
+    @property
+    def raw(self):
+        ret = dict(
+            name=self.name,
+            shape=self.kind(),
+            coordinates=self.coordinates,
+            clat=self.clat,
+            clon=self.clon,
+        )
+        if hasattr(self, "color"):
+            ret["color"] = self.color
+        return ret
+
+
+class Circle(areafilter.Circle):
+    """
+    A Circle shape.
+    """
+
+    def __init__(self, name, coordinates, top=1e9, bottom=-1e9):
+        super().__init__(name, coordinates, top, bottom)
+
+    @property
+    def raw(self):
+        ret = dict(
+            name=self.name,
+            shape=self.kind(),
+            coordinates=self.coordinates,
+            clat=self.clat,
+            clon=self.clon,
+        )
+        if hasattr(self, "color"):
+            ret["color"] = self.color
+        return ret

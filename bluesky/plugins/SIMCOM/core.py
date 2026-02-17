@@ -18,8 +18,6 @@ TODO:
 
 - Implement other attack types (surveillance, icao).
 - Move everything inside BlueSky, not a plugin anymore.
-- Create ADS-B based conflict resolution method.
-- Create custom GUI for the areas.
 """
 
 ACUPDATE_RATE = 2  # Update rate of aircraft update messages [Hz]
@@ -80,10 +78,10 @@ class Traffic(core.Entity):
             self.security = Security()
             # Pass reference to security
             self.aircraft = Aircraft(security=self.security)
-            self.receivers = Receivers(security=self.security, loc=self.phys.rx_loc)
+            self.receivers = Receivers(security=self.security, loc=self.phys)
 
             # Attacker cannot access security layer
-            self.attacker = Attacker(loc=self.phys.atk_loc)
+            self.attacker = Attacker(loc=self.phys)
 
     def create(self, n: int = 1) -> None:
         """
@@ -128,6 +126,12 @@ class Traffic(core.Entity):
                             transmission = self.attacker.intercept(msgs, i_ac, t)
                             transmissions.append(transmission)
 
+                            print(
+                                f"AC - Original transmission: t = {transmissions[0].time}"
+                            )
+                            print(f"AC - Attack propagation: t = {t}")
+                            print(f"AC - Attack transmission: t = {transmission.time}")
+
             else:
                 if self.attacker.flag:
 
@@ -139,7 +143,7 @@ class Traffic(core.Entity):
                     transmissions.append(self.attacker.emit_ghost(i_ac))
 
             # Receivers decode messages
-            for i_rx in range(self.receivers.n_rx):
+            for i_rx in range(self.phys.n_rx):
                 received = []
 
                 # Loop over transmissions
@@ -148,6 +152,8 @@ class Traffic(core.Entity):
 
                     # Save all received messages
                     received.append((msgs_rx, t))
+
+                    print(f"RX [{i_rx}] - Received time: t = {t}")
 
                 # Pick one to decode
                 msgs = self.phys.select_msgs(received)

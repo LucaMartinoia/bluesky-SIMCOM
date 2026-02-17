@@ -26,7 +26,7 @@ class Attacker(core.Entity):
             "FREEZE, HIDE, JUMP, MGHOST, GHOST, CONFGHOST, NONE, STATUS, RESET, TOGGLE"
         )
         self.flag = True  # Module ON/OFF flag
-        self.loc = loc[0] if loc else None
+        self.loc = loc
 
         # Create arrays for the attack arguments and cached values
         with self.settrafarrays():
@@ -73,7 +73,8 @@ class Attacker(core.Entity):
             return self.jump(msgs, index, t)
         else:
             # Return the message as is
-            return Transmission(msgs=msgs, source_loc=self.loc, time=0.0)
+            loc = (self.loc.attackers[0].clat, self.loc.attackers[0].clon)
+            return Transmission(msgs=msgs, source_loc=loc, time=0.0)
 
     def eavesdrop(self, msgs, i: int) -> None:
         """
@@ -111,8 +112,8 @@ class Attacker(core.Entity):
 
         # Processing time, preamble + icao
         t += 30e-6
-
-        return Transmission(msgs=msgs, source_loc=self.loc, time=t)
+        loc = (self.loc.attackers[0].clat, self.loc.attackers[0].clon)
+        return Transmission(msgs=msgs, source_loc=loc, time=t)
 
     def hide(self, msgs, t: float) -> Transmission:
         """
@@ -127,8 +128,8 @@ class Attacker(core.Entity):
 
         # Processing time, preamble + icao
         t += 30e-6
-
-        return Transmission(msgs=msgs, source_loc=self.loc, time=t)
+        loc = (self.loc.attackers[0].clat, self.loc.attackers[0].clon)
+        return Transmission(msgs=msgs, source_loc=loc, time=t)
 
     def jump(self, msgs, index: int, t: float) -> Transmission:
         """
@@ -150,18 +151,18 @@ class Attacker(core.Entity):
 
         # Processing time, half msg
         t += 60e-6
-
-        return Transmission(msgs=msgs, source_loc=self.loc, time=0.0)
+        loc = (self.loc.attackers[0].clat, self.loc.attackers[0].clon)
+        return Transmission(msgs=msgs, source_loc=loc, time=0.0)
 
     def emit_ghost(self, index: int) -> Transmission:
         """
         Simulate ghost aircraft.
         """
-
+        loc = (self.loc.attackers[0].clat, self.loc.attackers[0].clon)
         # Computes ADS-B messages
         return Transmission(
             msgs=self.adsbout.encode_msgs(index),
-            source_loc=self.loc,
+            source_loc=loc,
             time=0.0,
         )
 

@@ -19,15 +19,14 @@ class Receivers(core.Entity):
 
         # Global reference to security structure
         self.security = security
-        self.loc = loc if loc else None
-        self.n_rx = max(1, len(loc))
+        self.loc = loc
 
         self.spoofing_map = dict()
 
         # Ground-receivers ADS-B In
         with self.settrafarrays():
             # Owns ADS-B In
-            self.adsbin = ADSBin(self.n_rx)
+            self.adsbin = ADSBin(self.loc.n_rx)
             # Attack detected flag
             self.detatk = []
 
@@ -40,7 +39,7 @@ class Receivers(core.Entity):
 
         # For each aircraft, save an array of length n_rx
         for i_ac in range(-n, 0):
-            self.detatk[i_ac] = [False] * self.n_rx
+            self.detatk[i_ac] = [False] * self.loc.n_rx
 
     def decode(self, msgs, i_rx: int, i_ac: int) -> None:
         """
