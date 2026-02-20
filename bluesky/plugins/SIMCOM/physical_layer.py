@@ -1,11 +1,10 @@
 import numpy as np
 from dataclasses import dataclass
 from matplotlib.path import Path
-from typing import Any
+from bluesky import core, settings, stack
 from bluesky.tools import areafilter
 from bluesky.tools.geo import kwikdist
 from bluesky.tools.aero import nm
-from bluesky import core, settings, stack
 from bluesky.network.publisher import StatePublisher
 
 """
@@ -15,7 +14,7 @@ This module should implement transmission noise effects.
 settings.set_variable_defaults(attacker_locations=[], receiver_locations=[])
 
 C = 299702547  # speed of light in air [m/s]
-# Dictionary of all basic shapes (The shape classes defined in this file) by name
+# Dictionary of all basic shapes
 basic_shapes = dict()
 # Publisher object to manage publishing of states to clients
 polypub = StatePublisher("ADSBPOLY", collect=True)
@@ -23,10 +22,9 @@ polypub = StatePublisher("ADSBPOLY", collect=True)
 
 @dataclass
 class Transmission:
-    msgs: Any
+    msg: list
     source_loc: tuple[float, float] | None
     time: float = 0.0  # Time of emission
-    # power?
 
 
 class PhysicalLayer(core.Entity):
@@ -46,7 +44,15 @@ class PhysicalLayer(core.Entity):
 
         self.load_loc()
 
-    def select_msgs(self, received: list) -> str | None:
+    @property
+    def rx_view_idx(self):
+        """
+        Return current view, index 0-padded.
+        """
+
+        return self.view - 1 if self.rx_ranges else 0
+
+    def select_msg(self, received: list) -> list | None:
         """
         Given the list of received messages, select one to be decoded.
         """
@@ -60,12 +66,12 @@ class PhysicalLayer(core.Entity):
         msg_time = 112e-6  # 112 microseconds
 
         # All others are spoofed
-        for msgs, t in received[1:]:
-            if msgs is None:
+        for msg, t in received[1:]:
+            if msg is None:
                 continue
             # Time constraint on attacker
             if abs(t - t_orig) < msg_time:
-                return msgs
+                return msg
 
         # If no spoofed message arrived, return original
         return original_msg
@@ -104,58 +110,62 @@ class PhysicalLayer(core.Entity):
 
         return areas
 
-    def propagate(self, transmission, receiver: str, index: int = 0) -> tuple:
+    def propagate(
+        self, transmission: Transmission, receiver: str, index: int = 0
+    ) -> tuple[list | None, float]:
         """
         Compute the transmission losses along the path and returns a new message with timestamp.
 
         If messages fail to arrive it returns None instead.
         """
 
-        # Select range flag
+        # Determine ranges
         ranges = self.atk_ranges if receiver == "atk" else self.rx_ranges
 
         # Copy message to propagate
-        msgs = transmission.msgs.copy()
+        msg = transmission.msg.copy()
 
         # If ranges do not matter, return original message
         if not ranges:
-            return msgs, 0.0
+            return msg, 0.0
 
-        # Gather receiver and emitter locations
-        receiver_area = (
-            self.attackers[index] if receiver == "atk" else self.receivers[index]
-        )
-        receiver_loc = (
-            (self.attackers[index].clat, self.attackers[index].clon)
-            if receiver == "atk"
-            else (self.receivers[index].clat, self.receivers[index].clon)
-        )
+        # If no source location, return original message
+        if not transmission.source_loc:
+            return msg, 0.0
+
+        # Determine receiver area and location
+        if receiver == "atk":
+            receiver_area = self.attackers[index]
+            receiver_loc = (self.attackers[index].clat, self.attackers[index].clon)
+        else:
+            receiver_area = self.receivers[index]
+            receiver_loc = (self.receivers[index].clat, self.receivers[index].clon)
 
         lat_tx, lon_tx = transmission.source_loc
         lat_rx, lon_rx = receiver_loc
 
         # Check coverage
         if not receiver_area.checkInside(lat_tx, lon_tx, 0):
-            return None, None
+            return None, 0.0
 
-        # Distance in m
+        # Distance [m]
         d = kwikdist(lat_tx, lon_tx, lat_rx, lon_rx) * nm
 
         # Apply noise model
-        msgs = self.noise_model(d, msgs)
+        msg = self.noise_model(d, msg)
 
         # Time of arrival
         t_arrival = transmission.time + d / C
 
         # Retun message and timestamp
-        return msgs, t_arrival
+        return msg, t_arrival
 
-    def noise_model(self, d: float, msgs):
+    def noise_model(self, d: float, msg):
         """
         Implement a noise model.
         """
 
-        return msgs
+        return msg
 
     def hide(self, target: str = "") -> None:
         """
@@ -188,6 +198,7 @@ class PhysicalLayer(core.Entity):
         for areas, color in configs:
             for area in areas:
                 colour(area.name, *color)
+                print("coloring ATK")
 
     def highlight(self, rx: int = 0) -> None:
         """
@@ -221,6 +232,8 @@ class PhysicalLayer(core.Entity):
         self.highlight(self.view)
         self.show("ATK")
 
+        print("LOADLOC", self.receivers)
+
         return True, ""
 
     @stack.command(name="RXVIEW", brief="RXVIEW 0/1/2/...")
@@ -250,7 +263,22 @@ class PhysicalLayer(core.Entity):
 
         # Not a valid POV
         else:
-            return False, f"{rx} is not a valid number."
+            return False, f"{rx} is not a valid receiver number."
+
+    @stack.command(name="ATKRANGE", brief="ATKRANGE 0/1")
+    def atkrange(self, atk: int) -> tuple[bool, str]:
+        """
+        Toggle ATK ranges.
+        """
+
+        if atk == 0:
+            self.atk_ranges = False
+            return True, "Attacker range disabled."
+        elif atk == 1:
+            self.atk_ranges = True
+            return True, "Attacker range enabled."
+        else:
+            return False, f"{atk} is not a valid number."
 
 
 @polypub.payload
@@ -262,6 +290,7 @@ def defineArea(name, shape, coordinates, top=1e9, bottom=-1e9):
     """
     Define a new area.
     """
+
     if name == "LIST":
         if not basic_shapes:
             return True, "No shapes are currently defined."
@@ -284,13 +313,17 @@ def defineArea(name, shape, coordinates, top=1e9, bottom=-1e9):
         polys={name: dict(shape=shape, coordinates=coordinates, clat=clat, clon=clon)}
     )
 
-    return True  # , f'Created {shape} {name}'
+    polys = {name: dict(shape=shape, coordinates=coordinates, clat=clat, clon=clon)}
+    print(polys)
+
+    return True
 
 
 def colour(name, r, g, b):
     """
     Set custom color for visual objects.
     """
+
     poly = basic_shapes.get(name)
     if poly:
         poly.color = (r, g, b)

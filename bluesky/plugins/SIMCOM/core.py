@@ -1,5 +1,6 @@
 import numpy as np
-from bluesky import core, stack, traf, settings
+from dataclasses import fields
+from bluesky import core, stack, traf, settings, sim
 from bluesky.network.publisher import state_publisher
 from bluesky.plugins.SIMCOM.attacker import Attacker
 from bluesky.plugins.SIMCOM.conflict_detection import ConflictDetection
@@ -8,16 +9,15 @@ from bluesky.plugins.SIMCOM.receivers import Receivers
 from bluesky.plugins.SIMCOM.aircraft import Aircraft
 from bluesky.plugins.SIMCOM.datalogger import Logger
 from bluesky.plugins.SIMCOM.physical_layer import PhysicalLayer
+from bluesky.plugins.SIMCOM.adsbout import ADSBout
 
 """
 SIMCOM is a BlueSky plugin that adds ADS-B-specific functionality, providing tools to analyze
 the impact of cyber-attacks and evaluate cyber-security measures in air traffic systems.
 
 TODO:
-- Refactor update to work with Timers (change Nonce management and add even/odd message caching in ADS-B In).
-
+- Fix bugs and add more descriptions.
 - Implement other attack types (surveillance, icao).
-- Move everything inside BlueSky, not a plugin anymore.
 """
 
 ACUPDATE_RATE = 2  # Update rate of aircraft update messages [Hz]
@@ -31,7 +31,7 @@ def init_plugin():
     Plugin initialisation function.
     """
 
-    print("\nSIMCOM: Loading SIMCOM plugin...\n")
+    print("\nSIMCOM PLUGIN LOADED.\n")
 
     # Instantiate singleton entity
     adsbtraffic = Traffic()
@@ -91,84 +91,163 @@ class Traffic(core.Entity):
         # The childrens are created automatically
         super().create(n)
 
-    @core.timed_function(dt=UPDATE)  # Run every 0.5 seconds # type:ignore
-    def update_ADSB(self) -> None:
+    def update(self) -> None:
         """
-        Core logic loop.
-
         Iterates over all aircraft to compute ADS-B messages, apply attacks and decode.
+
+        Passing the aircraft index and the message type along.
         """
 
-        # Compute ADS-B messages for all aircraft
-        for i_ac in range(traf.ntraf):
+        N = traf.ntraf
 
-            # All message transmissions for this aircraft
-            transmissions = []
+        # Extract indices for real and ghost AC
+        real_indices = [i for i in range(N) if self.is_real(i)]
+        ghost_indices = [i for i in range(N) if self.is_ghost(i) and self.attacker.flag]
 
-            # If real aircraft
-            if self.is_real_aircraft(i_ac):
+        # ADS-B message loops
+        self.adsb_cycle(real_indices)
+        self.inject_ghost_transmission(ghost_indices)
 
-                # Emit ADS-B messages
-                transmissions = [self.aircraft.emit_msgs(i_ac)]
+        # Ground-based conflict detection update
+        if self.asastimer.readynext:
+            i_rx = self.phys.rx_view_idx
+            self.cd.update(self.receivers.adsbin, self.receivers.adsbin, i_rx)
 
-                # Apply attacks
-                if self.attacker.flag:
+        # Update GHOST position
+        if self.attacker.flag:
+            self.attacker.update()
 
-                    # Propagate message to attacker
-                    msgs, t = self.phys.propagate(transmissions[0], "atk")
+    def adsb_cycle(self, real_indices: list):
+        """
+        Real aircraft ADS-B update cycle.
+        """
 
-                    # Update the attacker's ADS-B In cache
-                    if msgs is not None:
-                        self.attacker.eavesdrop(msgs, i_ac)
+        # Default update frequencies of ADS-B messages per type
+        frequencies = ADSBout.freq
 
-                        # Perform active attacks
-                        if self.under_attack(i_ac):
-                            transmission = self.attacker.intercept(msgs, i_ac, t)
-                            transmissions.append(transmission)
+        for i_ac in real_indices:
+            # Gather timers of last emitted messages
+            lastemit = self.aircraft.last_emit(i_ac)
 
-                            print(
-                                f"AC - Original transmission: t = {transmissions[0].time}"
-                            )
-                            print(f"AC - Attack propagation: t = {t}")
-                            print(f"AC - Attack transmission: t = {transmission.time}")
+            # Loop over all message types
+            for f in fields(lastemit):
+                msg_type = f.name
+                last_time = getattr(lastemit, msg_type)
+                dt = getattr(frequencies, msg_type)
 
-            else:
-                if self.attacker.flag:
+                # If last message is far in the past, emit a new one
+                if last_time + dt <= sim.simt:
+                    transmissions = [self.aircraft.emit_msg(i_ac, msg_type)]
 
-                    # Empty again GHOST aircraft traffic attributes, just in case
-                    if not np.isnan(traf.lat[i_ac]):
-                        self.attacker.empty_aircraft_attributes(i_ac)
+                    # Apply attacks
+                    if self.attacker.flag:
+                        # Propagate message to attacker
+                        msg, t = self.phys.propagate(transmissions[0], "atk")
 
-                    # Emit GHOST ADS-B messages
-                    transmissions.append(self.attacker.emit_ghost(i_ac))
+                        # If message arrives
+                        if msg is not None:
+                            # Perform passive attack
+                            self.attacker.eavesdrop(msg, msg_type, i_ac)
 
-            # Receivers decode messages
-            for i_rx in range(self.phys.n_rx):
-                received = []
+                            # Perform active attacks
+                            if self.under_attack(i_ac):
+                                transmission = self.attacker.intercept(
+                                    msg,
+                                    msg_type,
+                                    t,
+                                    i_ac,
+                                )
+                                if transmission:
+                                    transmissions.append(transmission)
 
-                # Loop over transmissions
-                for transmission in transmissions:
-                    msgs_rx, t = self.phys.propagate(transmission, "rx", index=i_rx)
+                    # For each receiver
+                    for i_rx in range(self.phys.n_rx):
+                        received = []
 
-                    # Save all received messages
-                    received.append((msgs_rx, t))
+                        # Loop over all transmissions
+                        for transmission in transmissions:
+                            # Propagate transmission from souce to receiver
+                            msg, t = self.phys.propagate(transmission, "rx", index=i_rx)
+                            if msg:
+                                received.append((msg, t))
 
-                    print(f"RX [{i_rx}] - Received time: t = {t}")
+                        # Of all the valid messages arrived, select one to decode
+                        msg = self.phys.select_msg(received)
 
-                # Pick one to decode
-                msgs = self.phys.select_msgs(received)
+                        # If at least a message arrived, decode
+                        if msg is not None:
+                            self.receivers.decode(msg, msg_type, i_rx, i_ac)
 
-                if msgs is None:
-                    self.elapse_time(i_rx, i_ac)
-                else:
-                    self.receivers.decode(msgs, i_rx, i_ac)
+                        # At the end of the loop, each receiver clear old cache
+                        self.receivers.clear_stale_cache(i_ac, i_rx)
 
-    def is_real_aircraft(self, i: int) -> bool:
+    def inject_ghost_transmission(self, ghost_indices: list) -> None:
+        """
+        GHOST aircraft ADS-B update cycle.
+        """
+
+        # Default update frequencies of ADS-B messages per type
+        frequencies = ADSBout.freq
+
+        for i_ac in ghost_indices:
+            # Gather timers of last emitted messages
+            lastemit = self.attacker.adsbout.lastemit[i_ac]
+
+            # Reset traf
+            self.reset_traf(i_ac)
+
+            # Loop over all message types
+            for f in fields(lastemit):
+                msg_type = f.name
+                last_time = getattr(lastemit, msg_type)
+                dt = getattr(frequencies, msg_type)
+
+                # If last message is far in the past, emit a new one
+                if last_time + dt <= sim.simt:
+                    transmissions = [self.attacker.emit_msg(i_ac, msg_type)]
+
+                    # For each receiver
+                    for i_rx in range(self.phys.n_rx):
+                        received = []
+
+                        # Loop over all transmissions
+                        for transmission in transmissions:
+                            # Propagate transmission from souce to receiver
+                            msg, t = self.phys.propagate(transmission, "rx", i_rx)
+                            if msg:
+                                received.append((msg, t))
+
+                        # Of all the valid messages arrived, select one to decode
+                        msg = self.phys.select_msg(received)
+
+                        # If at least a message arrived, decode
+                        if msg is not None:
+                            self.receivers.decode(msg, msg_type, i_rx, i_ac)
+
+                        # At the end of the loop, each receiver clear old cache
+                        self.receivers.clear_stale_cache(i_ac, i_rx)
+
+    def is_real(self, i: int) -> bool:
         """
         Return True if aircraft is real, False if a GHOST.
         """
 
         return self.attacker.type[i] != "GHOST"
+
+    def is_ghost(self, i: int) -> bool:
+        """
+        Return True if aircraft is GHOST, False if a true.
+        """
+
+        return not self.is_real(i)
+
+    def reset_traf(self, i: int) -> None:
+        """
+        Wrapper function that reset the traf attributes to np.nan.
+        """
+
+        if not np.isnan(traf.lat[i]):
+            self.attacker.empty_aircraft_attributes(i)
 
     def under_attack(self, i: int) -> bool:
         """
@@ -176,16 +255,6 @@ class Traffic(core.Entity):
         """
 
         return self.attacker.type[i] != "NONE"
-
-    def elapse_time(self, i_rx, i_ac) -> None:
-        """
-        Skip time as counters.
-        """
-
-        value = 1 + self.receivers.adsbin.stale_counters[i_ac][i_rx].position
-        self.receivers.adsbin.set_counters(i_rx, i_ac, value)
-        if value >= self.receivers.adsbin.max_counter:
-            self.receivers.adsbin.clear_cache(i_rx, i_ac)
 
     def reset(self) -> None:
         """
@@ -199,23 +268,6 @@ class Traffic(core.Entity):
         super().reset()
 
         self.phys.reset()
-
-    def update(self) -> None:
-        """
-        Update functions is called every sim.dt step.
-        """
-
-        # Ground-based conflict detection update
-        if self.asastimer.readynext:
-            i_rx = self.phys.view - 1 if self.phys.rx_ranges else 0
-            ownship, intruder = self.cd.gather_data(
-                self.receivers.adsbin, self.receivers.adsbin, i_rx
-            )
-            self.cd.update(ownship, intruder)
-
-        # Update GHOST position
-        if self.attacker.flag:
-            self.attacker.update_attacks()
 
     # --------------------------------------------------------------------
     #                      PUBLISHER
@@ -236,10 +288,12 @@ class Traffic(core.Entity):
         data["gt_lon"] = traf.lon
         data["gt_lat"] = traf.lat
         data["translvl"] = traf.translvl
+
+        # Receiver view data
         data["view"] = self.phys.view
         data["rxranges"] = self.phys.rx_ranges
 
-        # Stack receiver-dependent ADS-B In data
+        # Receiver ADS-B In data
         data["icao"] = self.receivers.adsbin.icao
         data["callsign"] = self.receivers.adsbin.callsign
         data["ss"] = self.receivers.adsbin.ss
@@ -249,7 +303,7 @@ class Traffic(core.Entity):
         data["gs"] = self.receivers.adsbin.gs
         data["vs"] = self.receivers.adsbin.vs
         data["trk"] = self.receivers.adsbin.trk
-        data["attack"] = self.receivers.detatk
+        data["attack"] = self.receivers.atkflag
 
         data["spoofing"] = self.receivers.spoofing_map
 

@@ -1,7 +1,7 @@
 import pyModeS as pms
 import numpy as np
 from dataclasses import dataclass, fields
-from bluesky import core
+from bluesky import core, sim
 from bluesky.tools.aero import ft, kts, fpm
 from bluesky.plugins.SIMCOM.tools import hex2bin, bin2int
 
@@ -12,11 +12,21 @@ Module for ADS-B In implementation.
 
 
 @dataclass
-class ADSBStaleCounters:
-    position: int = 0
-    velocity: int = 0
-    altitude: int = 0
-    callsign: int = 0
+class LastReceived:
+    # Data was never received
+    pos: float = -np.inf
+    v: float = -np.inf
+    alt: float = -np.inf
+    callsign: float = -np.inf
+
+
+@dataclass
+class StaleTimeout:
+    # Timeout timers for various quantities
+    pos: float = 5
+    v: float = 5
+    alt: float = 5
+    callsign: float = 10
 
 
 class ADSBin(core.TrafficArrays):
@@ -26,12 +36,14 @@ class ADSBin(core.TrafficArrays):
     Because of this, it cannot accept BlueSky decorators like Timers and Stack functions.
     """
 
-    def __init__(self, n_rx: int = 1) -> None:
+    def __init__(self, n: int = 1) -> None:
         super().__init__()
 
-        # Counter stop and number of ADSBin
-        self.max_counter = 5
-        self.n_rx = n_rx
+        # Number of ADS-B In instances
+        self.n = n
+
+        # Timeout timer
+        self.staletimeout = StaleTimeout()
 
         # Create ADS-B In cache
         with self.settrafarrays():
@@ -51,7 +63,10 @@ class ADSBin(core.TrafficArrays):
             self.capability = []
             self.ss = []
 
-            self.stale_counters = []
+            # Timestamps of last received data
+            self.lastreceived = []
+            # Last valid positional message
+            self.last_pos = []
 
     def create(self, n: int = 1) -> None:
         """
@@ -60,29 +75,31 @@ class ADSBin(core.TrafficArrays):
 
         super().create(n)
 
-        # For each aircraft, save an array of length n_rx
+        # For each aircraft, save an array of length n
         for i_ac in range(-n, 0):
-            self.icao[i_ac] = [""] * self.n_rx
-            self.callsign[i_ac] = [""] * self.n_rx
+            self.icao[i_ac] = [""] * self.n
+            self.callsign[i_ac] = [""] * self.n
 
-            self.altGNSS[i_ac] = [np.nan] * self.n_rx
-            self.alt[i_ac] = [np.nan] * self.n_rx
-            self.lat[i_ac] = [np.nan] * self.n_rx
-            self.lon[i_ac] = [np.nan] * self.n_rx
-            self.gsnorth[i_ac] = [np.nan] * self.n_rx
-            self.gseast[i_ac] = [np.nan] * self.n_rx
-            self.gs[i_ac] = [np.nan] * self.n_rx
-            self.vs[i_ac] = [np.nan] * self.n_rx
-            self.trk[i_ac] = [np.nan] * self.n_rx
+            self.altGNSS[i_ac] = [np.nan] * self.n
+            self.alt[i_ac] = [np.nan] * self.n
+            self.lat[i_ac] = [np.nan] * self.n
+            self.lon[i_ac] = [np.nan] * self.n
+            self.gsnorth[i_ac] = [np.nan] * self.n
+            self.gseast[i_ac] = [np.nan] * self.n
+            self.gs[i_ac] = [np.nan] * self.n
+            self.vs[i_ac] = [np.nan] * self.n
+            self.trk[i_ac] = [np.nan] * self.n
 
-            self.capability[i_ac] = [0] * self.n_rx
-            self.ss[i_ac] = [0] * self.n_rx
+            self.capability[i_ac] = [0] * self.n
+            self.ss[i_ac] = [0] * self.n
 
-            self.stale_counters[i_ac] = [ADSBStaleCounters() for _ in range(self.n_rx)]
+            self.lastreceived[i_ac] = [LastReceived() for _ in range(self.n)]
+            # Message, message type and timestamp
+            self.last_pos[i_ac] = [("", "", -np.inf) for _ in range(self.n)]
 
     def get(self, ac_idx: int, rx_idx: int = 0) -> dict:
         """
-        Get ADS-B data for a specific aircraft from a specific receiver.
+        Get ADS-B data for a specific aircraft.
         """
 
         return {
@@ -101,26 +118,56 @@ class ADSBin(core.TrafficArrays):
             "ss": self.ss[ac_idx][rx_idx],
         }
 
-    def decode_plaintext(self, msgs, i_rx: int, i_ac: int) -> None:
+    def decode_plaintext(self, msg: str, msg_type: str, i_rx: int, i_ac: int) -> None:
         """
         Decode the plaintext ADS-B messages and save the data to the cache.
         """
 
-        # Gather messages
-        pos_even = msgs.position_even[0]
-        pos_odd = msgs.position_odd[0]
-        vel = msgs.velocity[0]
-        id = msgs.identification[0]
+        if msg_type in ("even", "odd") and msg:
+            # Check if we already have the other type cached
+            last_msg, last_type, _ = self.last_pos[i_ac][i_rx]
+            if last_type != msg_type and last_msg:
+                # Determine which is even and which is odd
+                if msg_type == "even":
+                    pos_even = msg
+                    time_even = sim.simt
+                    pos_odd = last_msg
+                    time_odd = self.lastreceived[i_ac][i_rx].pos
+                else:
+                    pos_even = last_msg
+                    time_even = self.lastreceived[i_ac][i_rx].pos
+                    pos_odd = msg
+                    time_odd = sim.simt
 
-        # Update position and altitude cache
-        # TODO: split position and altitude updates
-        self.update_position_altitude(pos_even, pos_odd, i_rx, i_ac)
+                # Decode position using both messages
+                ret = self.update_position(
+                    pos_even, pos_odd, time_even, time_odd, i_rx, i_ac
+                )
+                if ret:
+                    setattr(self.lastreceived[i_ac][i_rx], "pos", sim.simt)
 
-        # Update velocity cache
-        self.update_velocity(vel, i_rx, i_ac)
+            # Decode altitude
+            ret = self.update_altitude(msg, i_rx, i_ac)
+            # Update timer
+            if ret:
+                setattr(self.lastreceived[i_ac][i_rx], "alt", sim.simt)
 
-        # Update ID cache
-        self.update_id(id, i_rx, i_ac)
+            # Cache the current message
+            self.last_pos[i_ac][i_rx] = (msg, msg_type, sim.simt)
+
+        elif msg_type == "v" and msg:
+            # Velocity message
+            ret = self.update_velocity(msg, i_rx, i_ac)
+            # Update timer
+            if ret:
+                setattr(self.lastreceived[i_ac][i_rx], "v", sim.simt)
+
+        elif msg_type == "id" and msg:
+            # Identification message
+            ret = self.update_id(msg, i_rx, i_ac)
+            # Update timer
+            if ret:
+                setattr(self.lastreceived[i_ac][i_rx], "callsign", sim.simt)
 
     def crc_check(self, msg: str) -> bool:
         """
@@ -132,142 +179,189 @@ class ADSBin(core.TrafficArrays):
             return False
         return True
 
-    def set_counters(self, i_rx: int, i_ac: int, value: int = 0) -> None:
-        """
-        Set all stale counters for a specific aircraft/receiver pair.
-        """
+    # --------------------------------------------------------------------
+    #                      CLEAR CACHES
+    # --------------------------------------------------------------------
 
-        counters = self.stale_counters[i_ac][i_rx]
-
-        for f in fields(counters):
-            setattr(counters, f.name, value)
-
-    def clear_cache(self, i_rx: int, i_ac: int) -> None:
+    def clear_stale_cache(self, i_ac: int, i_rx: int) -> None:
         """
-        Reset the cache for given receiver and aircraft.
+        Clear caches if data is too old.
         """
 
-        self.icao[i_ac][i_rx] = ""
-        self.callsign[i_ac][i_rx] = ""
+        # If last received is far in the past, clear cache
+        self.check_stale_position(i_ac, i_rx)
+        self.check_stale_velocity(i_ac, i_rx)
+        self.check_stale_altitude(i_ac, i_rx)
+        self.check_stale_callsign(i_ac, i_rx)
 
-        self.altGNSS[i_ac][i_rx] = np.nan
-        self.alt[i_ac][i_rx] = np.nan
-        self.lat[i_ac][i_rx] = np.nan
-        self.lon[i_ac][i_rx] = np.nan
-        self.gsnorth[i_ac][i_rx] = np.nan
-        self.gseast[i_ac][i_rx] = np.nan
-        self.gs[i_ac][i_rx] = np.nan
-        self.vs[i_ac][i_rx] = np.nan
-        self.trk[i_ac][i_rx] = np.nan
+    def check_stale_position(self, i_ac: int, i_rx: int) -> None:
+        """
+        Clear position cache if data is too old.
+        """
 
-        self.capability[i_ac][i_rx] = 0
-        self.ss[i_ac][i_rx] = 0
+        last = self.lastreceived[i_ac][i_rx].pos
+        timeout = self.staletimeout.pos
+
+        if sim.simt - last > timeout:
+            self.lat[i_ac][i_rx] = np.nan
+            self.lon[i_ac][i_rx] = np.nan
+
+        last_frame = self.last_pos[i_ac][i_rx][2]
+        if sim.simt - last_frame > timeout:
+            self.last_pos[i_ac][i_rx] = ("", "", -np.inf)
+
+    def check_stale_velocity(self, i_ac: int, i_rx: int) -> None:
+        """
+        Clear velocity cache if data is too old.
+        """
+
+        last = self.lastreceived[i_ac][i_rx].v
+        timeout = self.staletimeout.v
+
+        if sim.simt - last > timeout:
+            self.gs[i_ac][i_rx] = np.nan
+            self.gsnorth[i_ac][i_rx] = np.nan
+            self.gseast[i_ac][i_rx] = np.nan
+            self.vs[i_ac][i_rx] = np.nan
+            self.trk[i_ac][i_rx] = np.nan
+
+    def check_stale_altitude(self, i_ac: int, i_rx: int) -> None:
+        """
+        Clear altitude cache if data is too old.
+        """
+
+        last = self.lastreceived[i_ac][i_rx].alt
+        timeout = self.staletimeout.alt
+
+        if sim.simt - last > timeout:
+            self.alt[i_ac][i_rx] = np.nan
+            self.altGNSS[i_ac][i_rx] = np.nan
+
+    def check_stale_callsign(self, i_ac: int, i_rx: int) -> None:
+        """
+        Clear callsign cache if data is too old.
+        """
+
+        last = self.lastreceived[i_ac][i_rx].callsign
+        timeout = self.staletimeout.callsign
+
+        if sim.simt - last > timeout:
+            self.callsign[i_ac][i_rx] = ""
+
+    def set_stale_timers(self, time: float, i_ac: int, i_rx: int) -> None:
+        """
+        Reset timers to default values.
+        """
+
+        last = self.lastreceived[i_ac][i_rx]
+
+        for f in fields(last):
+            setattr(last, f.name, time)
 
     # --------------------------------------------------------------------
     #                      UPDATE VALUES
     # --------------------------------------------------------------------
 
-    def update_position_altitude(
+    def update_position(
         self,
         msg_pos_e: str,
         msg_pos_o: str,
+        time_even: float,
+        time_odd: float,
         i_rx: int,
         i_ac: int,
-    ) -> None:
+    ) -> bool:
         """
-        Update position and altitude cache only if decoding succeeds.
-        Keeps last good values otherwise.
+        Update position cache only if decoding succeeds.
         """
 
         # Decode position
-        lat_i, lon_i, icao_i = self.decode_position(msg_pos_e, msg_pos_o)
+        lat, lon, icao = self.decode_position(msg_pos_e, msg_pos_o, time_even, time_odd)
 
         # Update position cache
-        if not np.isnan(lat_i):
-            self.lat[i_ac][i_rx] = lat_i
-            self.lon[i_ac][i_rx] = lon_i
-            self.stale_counters[i_ac][i_rx].position = 0
-        else:
-            self.stale_counters[i_ac][i_rx].position += 1
-            if self.stale_counters[i_ac][i_rx].position >= self.max_counter:
-                self.lat[i_ac][i_rx] = np.nan
-                self.lon[i_ac][i_rx] = np.nan
+        if not np.isnan(lat) and not np.isnan(lon):
+            self.lat[i_ac][i_rx] = lat
+            self.lon[i_ac][i_rx] = lon
+
+            # Update ICAO if not already set
+            self.icao[i_ac][i_rx] = self.icao[i_ac][i_rx] or icao
+
+            return True
+        return False
+
+    def update_altitude(
+        self,
+        msg: str,
+        i_rx: int,
+        i_ac: int,
+    ) -> bool:
+        """
+        Update altitude cache only if decoding succeeds.
+        """
 
         # Decode altitude and surveillance status
-        alt_i, ss_i, icao_tmp = self.decode_altitude_ss(msg_pos_e)
-        if np.isnan(alt_i):  # type:ignore
-            alt_i, ss_i, icao_tmp = self.decode_altitude_ss(msg_pos_o)
+        alt, ss, icao = self.decode_altitude_ss(msg)
 
         # Update altitude cache
-        if not np.isnan(alt_i):  # type:ignore
-            self.alt[i_ac][i_rx] = alt_i * ft
-            self.altGNSS[i_ac][i_rx] = alt_i * ft
-            self.ss[i_ac][i_rx] = ss_i
-            self.stale_counters[i_ac][i_rx].altitude = 0
-        else:
-            self.stale_counters[i_ac][i_rx].altitude += 1
-            if self.stale_counters[i_ac][i_rx].altitude >= self.max_counter:
-                self.alt[i_ac][i_rx] = np.nan
-                self.altGNSS[i_ac][i_rx] = np.nan
-                self.ss[i_ac][i_rx] = 0
+        if not np.isnan(alt):  # type:ignore
+            self.alt[i_ac][i_rx] = alt * ft
+            self.altGNSS[i_ac][i_rx] = alt * ft
+            self.ss[i_ac][i_rx] = ss
 
-        # Update ICAO if not already set
-        icao_i = icao_i or icao_tmp  # keeps first valid ICAO
-        self.icao[i_ac][i_rx] = icao_i if icao_i else self.icao[i_ac][i_rx]
+            # Update ICAO if not already set
+            self.icao[i_ac][i_rx] = self.icao[i_ac][i_rx] or icao
 
-    def update_velocity(self, msg_vel: str, i_rx: int, i_ac: int) -> None:
+            return True
+        return False
+
+    def update_velocity(self, msg_vel: str, i_rx: int, i_ac: int) -> bool:
         """
         Update velocity cache only if decoding succeeds.
-        Keeps last good values otherwise.
         """
 
         # Decode velocity
-        speed_i, track_i, vs_i, icao_i = self.decode_velocity(msg_vel)
+        speed, track, vs, icao = self.decode_velocity(msg_vel)
 
         # Update velocity cache
-        if not np.isnan(speed_i):  # type:ignore
-            self.gs[i_ac][i_rx] = speed_i * kts  # To [m/s]
-            self.trk[i_ac][i_rx] = track_i
+        if not np.isnan(speed) and not np.isnan(track) and not np.isnan(vs):
+            self.gs[i_ac][i_rx] = speed * kts  # To [m/s]
+            self.trk[i_ac][i_rx] = track
             rads = np.deg2rad(self.trk[i_ac][i_rx])
             self.gsnorth[i_ac][i_rx] = self.gs[i_ac][i_rx] * np.cos(rads)
             self.gseast[i_ac][i_rx] = self.gs[i_ac][i_rx] * np.sin(rads)
-            self.vs[i_ac][i_rx] = vs_i * fpm  # To [m/s]
-            self.stale_counters[i_ac][i_rx].velocity = 0
-        else:
-            # Or clear buffers
-            self.stale_counters[i_ac][i_rx].velocity += 1
-            if self.stale_counters[i_ac][i_rx].velocity >= self.max_counter:
-                self.gs[i_ac][i_rx] = np.nan
-                self.trk[i_ac][i_rx] = np.nan
-                self.vs[i_ac][i_rx] = np.nan
-                self.gsnorth[i_ac][i_rx] = np.nan
-                self.gseast[i_ac][i_rx] = np.nan
+            self.vs[i_ac][i_rx] = vs * fpm  # To [m/s]
 
-        self.icao[i_ac][i_rx] = icao_i if icao_i else self.icao[i_ac][i_rx]
+            # Update ICAO if not already set
+            self.icao[i_ac][i_rx] = self.icao[i_ac][i_rx] or icao
 
-    def update_id(self, msg_id: str, i_rx: int, i_ac: int) -> None:
+            return True
+        return False
+
+    def update_id(self, msg_id: str, i_rx: int, i_ac: int) -> bool:
         """
         Update identification cache only if decoding succeeds.
         Keeps last good values otherwise.
         """
 
         # Decode callsign
-        callsign_i, icao_i = self.decode_callsign(msg_id)
+        callsign, icao = self.decode_callsign(msg_id)
 
         # Update callsign cache
-        if callsign_i:
-            self.callsign[i_ac][i_rx] = callsign_i
-            self.stale_counters[i_ac][i_rx].callsign = 0
-        else:
-            # Or clear buffers
-            self.stale_counters[i_ac][i_rx].callsign += 1
-            if self.stale_counters[i_ac][i_rx].callsign >= self.max_counter:
-                self.callsign[i_ac][i_rx] = ""
+        if callsign:
+            self.callsign[i_ac][i_rx] = callsign
 
-        self.icao[i_ac][i_rx] = icao_i if icao_i else self.icao[i_ac][i_rx]
+            # Update ICAO if not already set
+            self.icao[i_ac][i_rx] = self.icao[i_ac][i_rx] or icao
+
+            return True
+        return False
+
+    # --------------------------------------------------------------------
+    #                      DECODE MESSAGES
+    # --------------------------------------------------------------------
 
     def decode_position(
-        self, msg_pos_e: str, msg_pos_o: str
+        self, msg_pos_e: str, msg_pos_o: str, time_even: float, time_odd: float
     ) -> tuple[float, float, str]:
         """
         Decode lat/lon from even+odd position messages.
@@ -275,8 +369,10 @@ class ADSBin(core.TrafficArrays):
 
         # TODO: implement single-message position decoding
         try:
-            lat, lon = pms.adsb.airborne_position(msg_pos_e, msg_pos_o, 0, 1)  # type: ignore
+            lat, lon = pms.adsb.airborne_position(msg_pos_e, msg_pos_o, time_even, time_odd)  # type: ignore
             icao = pms.icao(msg_pos_e)
+            if not icao:
+                icao = pms.icao(msg_pos_o)
             return lat, lon, icao
         except Exception:
             return np.nan, np.nan, ""

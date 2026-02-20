@@ -1,4 +1,4 @@
-from bluesky import core, traf, stack
+from bluesky import core, traf, stack, sim
 from bluesky.plugins.SIMCOM.adsbout import ADSBout
 from bluesky.plugins.SIMCOM.shared_airspace import SharedAirspace
 from bluesky.plugins.SIMCOM.physical_layer import Transmission
@@ -27,7 +27,8 @@ class Aircraft(core.Entity):
             # Military aircraft
             self.sharedair = SharedAirspace()
 
-            self.last_fired = []
+            # Cryptographic nonce counter
+            self.counter = []
 
     def create(self, n: int = 1) -> None:
         """
@@ -37,9 +38,9 @@ class Aircraft(core.Entity):
 
         super().create(n)
 
-        self.last_fired[-n:] = [""] * n
+        self.counter[-n:] = [0] * n
 
-    def emit_msgs(self, index: int):
+    def emit_msg(self, index: int, msg_type: str) -> Transmission:
         """
         Selected aircraft emits ADS-B messages from ADS-B Out.
         """
@@ -48,14 +49,20 @@ class Aircraft(core.Entity):
         self.adsbout.update_registry(traf, index)
 
         if self.security.flag and self.security.scheme[index] != "NONE":
-            # Apply cyber-security scheme
-            msgs = self.adsbout.encode_msgs(index, crc=False)
-            msgs = self.security.apply_schemes(msgs, index)
+            # Encode ADS-B message
+            msg = self.adsbout.encode_msg(index, msg_type, crc=False)
+            counter = self.counter[index]
+            model = self.security.model[index]
+            # Apply encryption scheme
+            msg, self.counter[index] = self.security.apply_schemes(msg, counter, model)
         else:
             # Or simple ADS-B messages
-            msgs = self.adsbout.encode_msgs(index)
+            msg = self.adsbout.encode_msg(index, msg_type)
 
-        return Transmission(msgs=msgs, source_loc=self.loc(index), time=0.0)
+        # Update emission timer
+        setattr(self.adsbout.lastemit[index], msg_type, sim.simt)
+
+        return Transmission(msg=msg, source_loc=self.loc(index), time=0.0)
 
     def loc(self, index: int) -> tuple[float, float]:
         """
@@ -63,6 +70,13 @@ class Aircraft(core.Entity):
         """
 
         return (traf.lat[index], traf.lon[index])
+
+    def last_emit(self, index: int):
+        """
+        Return timers of last emitted messages.
+        """
+
+        return self.adsbout.lastemit[index]
 
     # --------------------------------------------------------------------
     #                      STACK COMMANDS

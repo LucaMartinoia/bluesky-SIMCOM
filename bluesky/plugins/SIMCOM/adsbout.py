@@ -1,7 +1,7 @@
 import pyModeS as pms
 import numpy as np
 from dataclasses import dataclass, field
-from bluesky import core
+from bluesky import core, sim
 from bluesky.tools.aero import kts, ft, a0, Rearth
 from bluesky.plugins.SIMCOM.tools import hex2bin, bin2hex, int2bin
 
@@ -14,38 +14,28 @@ Module for ADS-B Out implementation.
 TYPE_CODES = dict(identification=4, position=9, velocity=19)
 
 
-# List of data for each message type
 @dataclass
-class ADSBmessages:
-    position_even: list = field(default_factory=lambda: [""])
-    position_odd: list = field(default_factory=lambda: [""])
-    identification: list = field(default_factory=lambda: [""])
-    velocity: list = field(default_factory=lambda: [""])
+class Frequencies:
+    # Default update rates [s]
+    even: float = 1
+    odd: float = 1
+    v: float = 3
+    id: float = 5
 
-    def copy(self):
-        """
-        Create a copy.
-        """
-        return ADSBmessages(
-            position_even=self.position_even.copy(),
-            position_odd=self.position_odd.copy(),
-            identification=self.identification.copy(),
-            velocity=self.velocity.copy(),
-        )
 
-    def has_content(self) -> bool:
-        """
-        Return True if at least one message field is not None.
-        """
-        for lst in [
-            self.position_even,
-            self.position_odd,
-            self.identification,
-            self.velocity,
-        ]:
-            if any(item not in (None, "") for item in lst):
-                return True
-        return False
+@dataclass
+class LastEmitted:
+    # Timer for last emitted messages [s]
+    even: float = field(init=False)
+    odd: float = field(init=False)
+    v: float = field(init=False)
+    id: float = field(init=False)
+
+    def __post_init__(self):
+        self.even = sim.simt - float(np.random.rand()) * Frequencies.even
+        self.odd = self.even + 0.5
+        self.v = sim.simt - float(np.random.rand()) * Frequencies.v
+        self.id = sim.simt - float(np.random.rand()) * Frequencies.id
 
 
 class ADSBout(core.TrafficArrays):
@@ -54,6 +44,8 @@ class ADSBout(core.TrafficArrays):
 
     Because of this, it cannot accept BlueSky decorators like Timers and Stack functions.
     """
+
+    freq = Frequencies()
 
     def __init__(self) -> None:
         super().__init__()
@@ -74,6 +66,8 @@ class ADSBout(core.TrafficArrays):
             self.trk = np.array([], dtype=float)  # track angle [deg]
             self.capability = []  # CA field [int]
             self.ss = []  # surveillance status [int]
+
+            self.lastemit = []
 
     def create(self, n: int = 1) -> None:
         """
@@ -98,6 +92,8 @@ class ADSBout(core.TrafficArrays):
         self.callsign[-n:] = [""] * n
         self.icao[-n:] = [""] * n
 
+        self.lastemit[-n:] = [LastEmitted() for _ in range(n)]
+
     def get(self, ac_idx: int, rx_idx: int = 0) -> dict:
         """
         Get ADS-B data for a specific aircraft.
@@ -118,6 +114,10 @@ class ADSBout(core.TrafficArrays):
             "capability": self.capability[ac_idx],
             "ss": self.ss[ac_idx],
         }
+
+    # --------------------------------------------------------------------
+    #                      UPDATE REGISTRY
+    # --------------------------------------------------------------------
 
     def update_registry(self, reference, index: int, rx_idx: int = 0) -> None:
         """
@@ -203,21 +203,27 @@ class ADSBout(core.TrafficArrays):
         self.icao[index] = ""
         self.callsign[index] = ""
 
-    def encode_msgs(self, index: int, crc: bool = True) -> ADSBmessages:
+    # --------------------------------------------------------------------
+    #                      ENCODE MESSAGES
+    # --------------------------------------------------------------------
+
+    def encode_msg(self, index: int, msg_type: str, crc: bool = True) -> list:
         """
         Encode all ADS-B messages for a given aircraft.
 
         If crc is False the messages are encoded without CRC.
         """
 
-        msgs = ADSBmessages()
-        # Compute msgs
-        msgs.position_even = self.airborne_position(index, True, crc)
-        msgs.position_odd = self.airborne_position(index, False, crc)
-        msgs.identification = self.identification(index, crc)
-        msgs.velocity = self.airborne_velocity(index, crc)
-
-        return msgs
+        if msg_type == "even":
+            return self.airborne_position(index, even=True, crc=crc)
+        elif msg_type == "odd":
+            return self.airborne_position(index, even=False, crc=crc)
+        elif msg_type == "v":
+            return self.airborne_velocity(index, crc=crc)
+        elif msg_type == "id":
+            return self.identification(index, crc=crc)
+        else:
+            raise ValueError(f"Unknown msg_type: {msg_type}")
 
     def identification(self, index: int, crc: bool = True) -> list:
         """

@@ -1,7 +1,7 @@
 import numpy as np
 from types import SimpleNamespace
 from bluesky import core, stack, traf, ref, sim, settings, tools
-from bluesky.tools.aero import ft, Rearth, kts, nm
+from bluesky.tools.aero import Rearth, nm
 from bluesky.tools.misc import txt2alt
 from bluesky.plugins.SIMCOM.tools import id2idx
 from bluesky.plugins.SIMCOM.adsbout import ADSBout
@@ -25,8 +25,15 @@ class Attacker(core.Entity):
         self.command_str = (
             "FREEZE, HIDE, JUMP, MGHOST, GHOST, CONFGHOST, NONE, STATUS, RESET, TOGGLE"
         )
-        self.flag = True  # Module ON/OFF flag
+        # Module ON/OFF flag
+        self.flag = False
+        # Spatial references
         self.loc = loc
+        self.cloc = (
+            (self.loc.attackers[0].clat, self.loc.attackers[0].clon)
+            if len(self.loc.attackers) > 0
+            else None
+        )
 
         # Create arrays for the attack arguments and cached values
         with self.settrafarrays():
@@ -53,11 +60,22 @@ class Attacker(core.Entity):
         self.params[-n:] = [SimpleNamespace() for _ in range(n)]
         self.updateflag[-n:] = False
 
+    def clear_fields(self, index: int) -> None:
+        """
+        Reset attack fields.
+        """
+
+        self.type[index] = "NONE"
+        self.params[index] = SimpleNamespace()
+        self.updateflag[index] = False
+
     # --------------------------------------------------------------------
     #                      ATTACKS
     # --------------------------------------------------------------------
 
-    def intercept(self, msgs, index: int, t: float) -> Transmission:
+    def intercept(
+        self, msg: list, msg_type: str, t: float, index: int
+    ) -> Transmission | None:
         """
         Overwrites the ADS-B messages depending on the attack.
         """
@@ -66,107 +84,114 @@ class Attacker(core.Entity):
 
         # Call respective attack
         if type == "FREEZE":
-            return self.freeze(msgs, index, t)
+            return self.freeze(msg, msg_type, t, index)
         elif type == "HIDE":
-            return self.hide(msgs, t)
+            return self.hide(t)
         elif type == "JUMP":
-            return self.jump(msgs, index, t)
+            return self.jump(msg_type, t, index)
         else:
-            # Return the message as is
-            loc = (self.loc.attackers[0].clat, self.loc.attackers[0].clon)
-            return Transmission(msgs=msgs, source_loc=loc, time=0.0)
+            # Fallback case: Do nothing
+            print(f"Attack {type} not implemented.")
+            return None
 
-    def eavesdrop(self, msgs, i: int) -> None:
+    def eavesdrop(self, msg: list, msg_type: str, i: int) -> None:
         """
         Simulate passive attacks to update attacker's ADS-B In cache.
         """
 
-        # Unless GHOST, update ADS-B In cache
-        if not self.type[i] == "GHOST":
+        # Decode assuming plaintext, skipping CRC checks
+        self.adsbin.decode_plaintext(msg[0], msg_type, i_rx=0, i_ac=i)
 
-            # Decode assuming plaintext, skipping CRC checks
-            self.adsbin.decode_plaintext(msgs, i_rx=0, i_ac=i)
+        # Update timer
+        setattr(self.adsbin.lastreceived[i][0], msg_type, sim.simt)
 
-            # If new aircraft, register ICAO and callsign
-            if not self.adsbout.icao[i]:
-                self.adsbout.icao[i] = self.adsbin.icao[i]
-                self.adsbout.callsign[i] = self.adsbin.callsign[i]
+        # If new aircraft, save ICAO and callsign in ADS-B Out registry
+        if not self.adsbout.icao[i]:
+            self.adsbout.icao[i] = self.adsbin.icao[i]
+            self.adsbout.callsign[i] = self.adsbin.callsign[i]
 
-    def freeze(self, msgs, index: int, t: float) -> Transmission:
+    def freeze(self, msg: list, msg_type: str, t: float, index: int) -> Transmission:
         """
         Simulate replay attacks by freezing ADS-B outputs to last known values.
         """
 
-        # If initialized
-        if self.params[index].init:
-            # Overwrite the ADS-B messages with frozen ones
-            msgs.position_even = self.params[index].pos_even
-            msgs.position_odd = self.params[index].pos_odd
-        else:
-            # Save last known ADS-B messages
-            if msgs.position_even and msgs.position_odd:
-                self.params[index].pos_even = msgs.position_even
-                self.params[index].pos_odd = msgs.position_odd
-                # Set initialization flag to True
-                self.params[index].init = True
+        # Ensure the attribute exists
+        if not hasattr(self.params[index], msg_type):
+            setattr(self.params[index], msg_type, [])
 
-        # Processing time, preamble + icao
-        t += 30e-6
-        loc = (self.loc.attackers[0].clat, self.loc.attackers[0].clon)
-        return Transmission(msgs=msgs, source_loc=loc, time=t)
+        cached = getattr(self.params[index], msg_type)
 
-    def hide(self, msgs, t: float) -> Transmission:
+        # If not initialized, cache message
+        if not cached and msg[0]:
+            cached = msg.copy()
+            setattr(self.params[index], msg_type, cached)
+
+        # Processing time, df + ca + icao
+        t += 32e-6
+
+        print("Frozen msg", cached, msg_type)
+
+        return Transmission(msg=cached, source_loc=self.cloc, time=t)
+
+    def hide(self, t: float) -> Transmission:
         """
         Simulate selective jamming by deleting ADS-B messages.
         """
 
-        # Delete current messages
-        msgs.position_even = [""]
-        msgs.position_odd = [""]
-        msgs.identification = [""]
-        msgs.velocity = [""]
+        # Delete message
+        msg = [""]
+        # Processing time, df + ca + icao
+        t += 32e-6
 
-        # Processing time, preamble + icao
-        t += 30e-6
-        loc = (self.loc.attackers[0].clat, self.loc.attackers[0].clon)
-        return Transmission(msgs=msgs, source_loc=loc, time=t)
+        return Transmission(msg=msg, source_loc=self.cloc, time=t)
 
-    def jump(self, msgs, index: int, t: float) -> Transmission:
+    def jump(self, msg_type: str, t: float, index: int) -> Transmission | None:
         """
         Simulate a spoofing attack that modifies ADS-B position.
         """
 
-        # Update ADS-B Out registry with ADS-B In data
-        self.adsbout.update_registry(reference=self.adsbin, index=index)
+        # Only spoof position messages
+        if msg_type in ("even", "odd"):
 
-        # Modify registry with spoofed position
-        self.adsbout.lat[index] = self.adsbout.lat[index] + self.params[index].lat
-        self.adsbout.lon[index] = self.adsbout.lon[index] + self.params[index].lon
-        self.adsbout.alt[index] = self.adsbout.alt[index] + self.params[index].alt
-        self.adsbout.altGNSS[index] = self.adsbout.alt[index]
+            # Update ADS-B Out registry with ADS-B In reference
+            self.adsbout.update_registry(reference=self.adsbin, index=index)
 
-        # Compute corrupted messages
-        msgs.position_even = self.adsbout.airborne_position(index, even=True)
-        msgs.position_odd = self.adsbout.airborne_position(index, even=False)
+            # Apply spoofed offsets
+            self.adsbout.lat[index] += self.params[index].lat
+            self.adsbout.lon[index] += self.params[index].lon
+            self.adsbout.alt[index] += self.params[index].alt
+            self.adsbout.altGNSS[index] = self.adsbout.alt[index]
 
-        # Processing time, half msg
-        t += 60e-6
-        loc = (self.loc.attackers[0].clat, self.loc.attackers[0].clon)
-        return Transmission(msgs=msgs, source_loc=loc, time=0.0)
+            # Recompute only the required frame
+            if msg_type == "even":
+                msg = self.adsbout.airborne_position(index, even=True)
+            else:
+                msg = self.adsbout.airborne_position(index, even=False)
 
-    def emit_ghost(self, index: int) -> Transmission:
+            # Processing delay (half message processing)
+            t += 60e-6
+
+            return Transmission(msg=msg, source_loc=self.cloc, time=t)
+
+    def emit_msg(self, index: int, msg_type: str) -> Transmission:
         """
-        Simulate ghost aircraft.
+        Simulate GHOST aircraft.
         """
-        loc = (self.loc.attackers[0].clat, self.loc.attackers[0].clon)
-        # Computes ADS-B messages
+
+        # Create ADS-B message
+        msg = self.adsbout.encode_msg(index, msg_type)
+
+        # Update emission timer
+        setattr(self.adsbout.lastemit[index], msg_type, sim.simt)
+
+        # Transmit ADS-B message
         return Transmission(
-            msgs=self.adsbout.encode_msgs(index),
-            source_loc=loc,
+            msg=msg,
+            source_loc=self.cloc,
             time=0.0,
         )
 
-    def cre_ghost(
+    def create_ghost(
         self,
         callsign: str,
         lat: float,
@@ -212,7 +237,7 @@ class Attacker(core.Entity):
 
     def empty_aircraft_attributes(self, index: int) -> None:
         """
-        Set all aircraft traf attributes to np.nan.
+        Set all traf attributes to np.nan for given aircraft.
         """
 
         # Set all ghost standard attributes to np.nan
@@ -231,7 +256,7 @@ class Attacker(core.Entity):
                     var = getattr(child, varname)
                     var[index] = np.nan
 
-    def update_attacks(self) -> None:
+    def update(self) -> None:
         """
         Update the ADS-B Out registry for dynamical attacks.
         """
@@ -272,8 +297,12 @@ class Attacker(core.Entity):
         FREEZE attack for a given aircraft.
         """
 
+        if not self.flag:
+            return False, f"The attack module if OFF."
+
+        self.clear_fields(acid)
+
         self.type[acid] = "FREEZE"
-        self.params[acid].init = False  # Initialization flag
 
         return True, f"{traf.id[acid]} is under FREEZE attack."
 
@@ -282,6 +311,11 @@ class Attacker(core.Entity):
         """
         HIDE attack for a given aircraft.
         """
+
+        if not self.flag:
+            return False, f"The attack module if OFF."
+
+        self.clear_fields(acid)
 
         self.type[acid] = "HIDE"
 
@@ -292,6 +326,11 @@ class Attacker(core.Entity):
         """
         JUMP attack for a given aircraft.
         """
+
+        if not self.flag:
+            return False, f"The attack module if OFF."
+
+        self.clear_fields(acid)
 
         self.type[acid] = "JUMP"
         self.params[acid] = SimpleNamespace(lat=lat, lon=lon, alt=txt2alt(alt))
@@ -306,15 +345,18 @@ class Attacker(core.Entity):
         GHOST aircraft.
         """
 
+        if not self.flag:
+            return False, f"The attack module if OFF."
+
         # If callsign already exists, create a new ACID
-        # TODO: check if acid already exists
         if callsign in traf.id:
-            acid = (
-                chr(np.random.randint(65, 91))
-                + chr(np.random.randint(65, 91))
-                + "{:>05}"
-            )
-            acid = acid.format(0)
+            acid = callsign
+            while acid in traf.id:
+                acid = (
+                    chr(np.random.randint(65, 91))
+                    + chr(np.random.randint(65, 91))
+                    + f"{np.random.randint(0, 100000):05}"
+                )
         else:
             acid = callsign
 
@@ -336,7 +378,7 @@ class Attacker(core.Entity):
         self.updateflag[-1] = True
 
         # Initialize ADS-B Out registry
-        self.cre_ghost(callsign, lat, lon, hdg, alt, gs)
+        self.create_ghost(callsign, lat, lon, hdg, alt, gs)
 
         return True, f"GHOST aircraft created."
 
@@ -345,6 +387,9 @@ class Attacker(core.Entity):
         """
         Creates multiple random GHOST aircraft.
         """
+
+        if not self.flag:
+            return False, f"The attack module if OFF."
 
         area = ref.area.bbox  # type:ignore
 
@@ -373,6 +418,9 @@ class Attacker(core.Entity):
         Remove selected aircraft. If no ACID is provided, remove ALL ghost aircraft instead.
         """
 
+        if not self.flag:
+            return False, f"The attack module if OFF."
+
         if acid != "":
             i = id2idx(acid)
             if i == -1:
@@ -396,6 +444,9 @@ class Attacker(core.Entity):
         Clear any attack for a given aircraft.
         """
 
+        if not self.flag:
+            return False, f"The attack module if OFF."
+
         if self.type[acid] == "GHOST":
             self.remove_ghost(acid)
             return (
@@ -414,6 +465,9 @@ class Attacker(core.Entity):
         Show current attack status for a given aircraft.
         """
 
+        if not self.flag:
+            return False, f"The attack module if OFF."
+
         return (
             True,
             f"Aircraft {traf.id[acid]} is currently under {self.type[acid]} attack.",
@@ -424,6 +478,9 @@ class Attacker(core.Entity):
         """
         Remove all attacks.
         """
+
+        if not self.flag:
+            return False, f"The attack module if OFF."
 
         # Remove ghost aircraft
         self.remove_ghost()
@@ -438,7 +495,7 @@ class Attacker(core.Entity):
         )
 
     @attack.subcommand(name="TOGGLE", brief="TOGGLE [flag]")
-    def attack_on(self, flag: str = "") -> tuple[bool, str]:
+    def attack_toggle(self, flag: str = "") -> tuple[bool, str]:
         """
         Enable/disable module.
         """
@@ -461,7 +518,7 @@ class Attacker(core.Entity):
     @attack.subcommand(
         name="GHOSTCONF", brief="GHOSTCONF acid,targetacid,dpsi,cpa,tlosh"
     )
-    def ghost_confs(self, acid: str, targetidx: "acid", dpsi: float, dcpa: float, tlosh: float) -> None:  # type: ignore
+    def ghost_confs(self, acid: str, targetidx: "acid", dpsi: float, dcpa: float, tlosh: float) -> tuple | None:  # type: ignore
         """
         Create a GHOST aircraft in conflict with target aircraft.
 
@@ -472,6 +529,9 @@ class Attacker(core.Entity):
         - cpa: Predicted distance at closest point of approach (NM)
         - tlosh: Horizontal time to loss of separation ((hh:mm:)sec)
         """
+
+        if not self.flag:
+            return False, f"The attack module if OFF."
 
         # Select source
         source = self.adsbout if self.type[targetidx] == "GHOST" else self.adsbin

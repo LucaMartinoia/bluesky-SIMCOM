@@ -1,6 +1,5 @@
 import os
 import pyModeS as pms
-from dataclasses import dataclass, fields, field
 from cryptography.hazmat.primitives.ciphers.aead import AESGCM
 from bluesky import core, stack, traf
 from bluesky.plugins.SIMCOM.tools import id2idx
@@ -8,14 +7,6 @@ from bluesky.plugins.SIMCOM.tools import id2idx
 """
 This module implements two encryption/authentication schemes.
 """
-
-
-@dataclass
-class Nonces:
-    position_even: bytes = field(default_factory=bytes)
-    position_odd: bytes = field(default_factory=bytes)
-    identification: bytes = field(default_factory=bytes)
-    velocity: bytes = field(default_factory=bytes)
 
 
 class Security(core.Entity):
@@ -37,11 +28,6 @@ class Security(core.Entity):
             self.model = []
             # Keys for the scheme
             self.keyring = []
-            # Nonce counter
-            self.counter = []
-            # Cached nonces at receiver
-            # TODO: refactor nonces so they are stored inside receiver?
-            self.nonces = []
 
     def create(self, n: int = 1) -> None:
         """
@@ -54,74 +40,63 @@ class Security(core.Entity):
         # Empty fields for newly created aircraft
         self.scheme[-n:] = ["NONE"] * n
         self.model[-n:] = [None] * n
-        self.counter[-n:] = [1] * n
         self.keyring[-n:] = [b""] * n
-        self.nonces[-n:] = [Nonces() for _ in range(n)]
 
     # --------------------------------------------------------------------
     #                      SECURITY SCHEMES
     # --------------------------------------------------------------------
 
-    def apply_schemes(self, msgs, index: int) -> None:
+    def apply_schemes(self, msg: list[str], counter: int, model) -> tuple[list, int]:
         """
         Wrapper function for the AES-GCM encryption scheme.
         """
 
-        return self.apply_AESGCM(msgs, index)
+        return self.encrypt_AESGCM(msg, counter, model)
 
     # --------------------------------------------------------------------
     #                      AES-GCM
     # --------------------------------------------------------------------
 
-    def apply_AESGCM(self, msgs, index: int) -> None:
+    def encrypt_AESGCM(self, msg: list[str], counter: int, model) -> tuple[list, int]:
         """
-        Encrypts the message using AES-GCM.
+        Encrypt a single ADS-B message using AES-GCM.
 
         Called from aircraft.
         """
 
-        # Loop over all message types
-        for f in fields(msgs):
-            msg_type = f.name
-            msg = getattr(msgs, msg_type)
-            # Skip empty messages
-            if not msg:
-                continue
+        # Skip empty message
+        if not msg or not msg[0]:
+            return msg, counter
 
-            # Compute the nonce from counter and random
-            nonce = os.urandom(8) + self.counter[index].to_bytes(4, "big")
+        # Compute nonce: 8 random bytes + 4-byte counter
+        nonce = os.urandom(8) + counter.to_bytes(4, "big")
 
-            # Convert ADS-B message in bytes
-            msg_bytes = bytes.fromhex(msg[0])
+        # Convert ADS-B message to bytes
+        msg_bytes = bytes.fromhex(msg[0])
 
-            # Split ADS-B fields in header and payload
-            aad = msg_bytes[:4]  # first 4 bytes: DF+CA+ICAO
-            payload = msg_bytes[4:]  # all bytes except first 4
+        # Split header (AAD) and payload
+        aad = msg_bytes[:4]  # DF + CA + ICAO
+        payload = msg_bytes[4:]  # Remaining bytes
 
-            # Encrypt and authenticate
-            ct = self.model[index].encrypt(nonce, payload, aad)  # type:ignore
+        # Encrypt and authenticate
+        ct_full = model.encrypt(nonce, payload, aad)  # type: ignore
 
-            # Split the cyphertext from the tag (16 bytes)
-            tag = ct[-16:]  # Last 16 bytes
-            ct = ct[:-16]  # Everything else
+        # Split ciphertext and tag (last 16 bytes)
+        tag = ct_full[-16:]
+        ct = ct_full[:-16]
 
-            # Compute the new CRC
-            ct_hex = ct.hex().upper()
-            aad_hex = aad.hex().upper()
-            msg_for_crc = (aad_hex + ct_hex) + "000000"
-            crc_value = pms.crc(msg_for_crc, encode=True)
-            crc_hex = f"{crc_value:06X}"  # 6-digit hex
+        # Recompute CRC over AAD + ciphertext
+        aad_hex = aad.hex().upper()
+        ct_hex = ct.hex().upper()
 
-            # The hex-message
-            full_msg = aad_hex + ct_hex + crc_hex
+        msg_for_crc = aad_hex + ct_hex + "000000"
+        crc_value = pms.crc(msg_for_crc, encode=True)
+        crc_hex = f"{crc_value:06X}"
 
-            # Move counter
-            self.counter[index] += 1
+        full_msg = aad_hex + ct_hex + crc_hex
 
-            # Update the message storing msg, tag and nonce
-            setattr(msgs, msg_type, [full_msg, tag, nonce])
-
-        return msgs
+        # Return encrypted structure
+        return [full_msg, tag, nonce], counter + 1
 
     def AESGCM_check_nonce(self, nonce: bytes, cached_nonce: bytes) -> bool:
         """
@@ -138,7 +113,9 @@ class Security(core.Entity):
 
         return True
 
-    def decrypt_AESGCM_message(self, msg: list, i: int, msg_type: str) -> list:
+    def decrypt_AESGCM(
+        self, msg: list, cached_nonce: bytes, model
+    ) -> tuple[list[str], bytes]:
         """
         Decrypts a single ADS-B hex message using AES-GCM.
         Returns decrypted payload as bytes, or [""] if authentication fails.
@@ -147,18 +124,16 @@ class Security(core.Entity):
         """
 
         if len(msg) != 3:
-            return [""]
+            return [""], cached_nonce
 
-        cached_nonce = getattr(self.nonces[i], msg_type)
         nonce = msg[2]
 
-        # TODO: Because I am iterating over single messages, I can cache only last nonce
         if not self.AESGCM_check_nonce(nonce, cached_nonce):
             # If old message, drop it and quit
-            return [""]
+            return [""], cached_nonce
         else:
             # Else update nonce cache
-            setattr(self.nonces[i], msg_type, nonce)
+            cached_nonce = nonce
 
         # Convert hex to bytes
         msg_bytes = bytes.fromhex(msg[0])
@@ -174,10 +149,10 @@ class Security(core.Entity):
 
         # Decrypt
         try:
-            plaintext = self.model[i].decrypt(nonce, ct, aad)  # type:ignore
-            return [(aad + plaintext + crc).hex().upper()]
+            plaintext = model.decrypt(nonce, ct, aad)  # type:ignore
+            return [(aad + plaintext + crc).hex().upper()], cached_nonce
         except Exception:
-            return [""]
+            return [""], cached_nonce
 
     # --------------------------------------------------------------------
     #                      STACK FUNCTIONS

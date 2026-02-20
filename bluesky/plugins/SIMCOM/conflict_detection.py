@@ -8,8 +8,6 @@ from bluesky.tools.aero import nm, ft
 Ground perspective of state-based conflict detection based on ADS-B data.
 """
 
-# Eventually, we can create a new set of ASAS settings.
-
 
 class ConflictDetection(core.Entity, replaceable=True):
     """
@@ -66,6 +64,7 @@ class ConflictDetection(core.Entity, replaceable=True):
         """
         Clear conflict database.
         """
+
         self.confpairs_unique.clear()
         self.lospairs_unique.clear()
         self.confpairs.clear()
@@ -82,6 +81,7 @@ class ConflictDetection(core.Entity, replaceable=True):
         """
         Default values for new aircraft.
         """
+
         super().create(n)
         # Initialise values of own states
         self.rpz[-n:] = self.rpz_def
@@ -93,6 +93,7 @@ class ConflictDetection(core.Entity, replaceable=True):
         """
         Reset all values.
         """
+
         super().reset()
         self.clearconfdb()
         self.confpairs_all.clear()
@@ -125,13 +126,16 @@ class ConflictDetection(core.Entity, replaceable=True):
 
         return ownship_reduced, intruder_reduced
 
-    def update(self, ownship, intruder) -> None:
+    def update(self, ownship, intruder, i_rx) -> None:
         """
         Perform an update step of the Conflict Detection implementation.
         """
 
         # If there are no aircraft or detection is off, pass
         if self.flag and len(ownship.callsign) != 0:
+            # Gather receiver-specific data
+            ownship, intruder = self.gather_data(ownship, intruder, i_rx)
+            # Compute conflict detections
             (
                 self.confpairs,
                 self.lospairs,
@@ -172,6 +176,7 @@ class ConflictDetection(core.Entity, replaceable=True):
         """
         Pass detect.
         """
+
         confpairs = []
         lospairs = []
         inconf = np.zeros(len(traf.id))
@@ -190,7 +195,7 @@ class ConflictDetection(core.Entity, replaceable=True):
 
     def detect(self, ownship, intruder, rpz, hpz, dtlookahead):
         """
-        Conflict detection between ownship and intruder.
+        State-based conflict detection between ownship and intruder.
         """
 
         # Identity matrix of order ntraf: avoid ownship-ownship detected conflicts

@@ -59,7 +59,6 @@ class Logger(core.Entity):
         if self.flag:
 
             # Conflict detection conflicts and loss of separations
-            # TODO: need to understand a better way to save CONFPAIRS
             self.conflict_list.append(cd.confpairs_unique)
             self.los_list.append(cd.lospairs_unique)
 

@@ -1,5 +1,5 @@
 import numpy as np
-from bluesky import stack, settings, ref, core
+from bluesky import stack, settings, ref
 from bluesky.ui.qtgl.glhelpers import (
     gl,
     RenderObject,
@@ -12,7 +12,6 @@ from bluesky.ui.qtgl.glhelpers import (
 from bluesky.network.subscriber import subscriber
 from bluesky.network.sharedstate import ActData
 from bluesky.network import context as ctx
-from bluesky.ui.qtgl import console
 from bluesky.network.common import ActionType
 from bluesky.ui.polytools import PolygonSet
 from bluesky.ui import palette
@@ -32,7 +31,7 @@ def init_plugin():
     # Configuration parameters
     config = {
         # The name of your plugin
-        "plugin_name": "ADSBVIEW",
+        "plugin_name": "ADSBGUI",
         # The type of this plugin.
         "plugin_type": "gui",
     }
@@ -55,6 +54,8 @@ palette.set_default_colours(
     ADSBdanger=(255, 0, 0),  # red: immediate danger
     ADSBspoofing=(255, 255, 0),  # yellow: suspicious / untrusted
     ADSBattack=(255, 0, 255),  # magenta: hostile / cyber
+    ATKpoly=(255, 0, 0),  # Red attackers
+    RXpoly=(0, 255, 150),  # Green receivers
 )
 
 
@@ -494,12 +495,13 @@ class ADSBview(RenderObject, layer=101):
 # -----------------------------------------------
 
 # Static defines
-POLYPREV_SIZE = 500  # Max number of vertices in preview off new edited polygon
 POLY_SIZE = 20000  # Max total number of vertices when summing all polygon vertices
 
 
 class Poly(RenderObject, layer=-10):
-    """Poly OpenGL object."""
+    """
+    Poly OpenGL object.
+    """
 
     # Per remote node attributes
     show_poly: ActData[int] = ActData(1)
@@ -508,7 +510,10 @@ class Poly(RenderObject, layer=-10):
 
     @stack.command
     def showloc(self, flag: int | None = None):
-        """Toggle drawing of polygon shapes between off, outline, and outline+fill."""
+        """
+        Toggle drawing of polygon shapes between off, outline, and outline+fill.
+        """
+
         # Cycle aircraft label through detail level 0,1,2
         if flag is None:
             self.show_poly = (self.show_poly + 1) % 3
@@ -519,8 +524,6 @@ class Poly(RenderObject, layer=-10):
 
     def __init__(self, parent=None):
         super().__init__(parent)
-        # Polygon preview object
-        self.polyprev = VertexArrayObject(gl.GL_LINE_LOOP)
 
         # Fixed polygons
         self.allpolys = VertexArrayObject(gl.GL_LINES)
@@ -537,13 +540,7 @@ class Poly(RenderObject, layer=-10):
         self.prevmousepos = (0, 0)
 
     def create(self):
-        # self.polyprev.create(vertex=POLYPREV_SIZE * 8,
-        #                      color=palette.previewpoly, usage=glh.gl.GL_DYNAMIC_DRAW)
-        self.polyprev.create(
-            vertex=POLYPREV_SIZE * 8,
-            color=palette.previewpoly,
-            usage=GLBuffer.UsagePattern.DynamicDraw,
-        )
+
         self.allpolys.create(vertex=POLY_SIZE * 16, color=POLY_SIZE * 8)
         self.allpfill.create(vertex=POLY_SIZE * 24, color=np.append(palette.polys, 50))
 
@@ -563,15 +560,13 @@ class Poly(RenderObject, layer=-10):
         )
 
     def draw(self):
+
         # Send the (possibly) updated global uniforms to the buffer
         self.shaderset.set_vertex_scale_type(self.shaderset.VERTEX_IS_LATLON)
 
         # --- DRAW THE MAP AND COASTLINES ---------------------------------------------
         # Map and coastlines: don't wrap around in the shader
         self.shaderset.enable_wrap(False)
-
-        # --- DRAW PREVIEW SHAPE (WHEN AVAILABLE) -----------------------------
-        self.polyprev.draw()
 
         # --- DRAW CUSTOM SHAPES (WHEN AVAILABLE) -----------------------------
         if self.show_poly > 0:
@@ -586,6 +581,8 @@ class Poly(RenderObject, layer=-10):
 
     @subscriber(topic="ADSBPOLY")
     def update_poly_data(self, data):
+
+        print("GUI poly data?")
 
         if ctx.action in (ActionType.Reset, ActionType.ActChange):
             # Simulation reset: Clear all entries
@@ -654,7 +651,10 @@ class Poly(RenderObject, layer=-10):
 
     @staticmethod
     def genbuffers(shape, coordinates, color=None):
-        """Generate outline, fill, and colour buffers for given shape."""
+        """
+        Generate outline, fill, and colour buffers for given shape.
+        """
+
         # Break up polyline list of (lat,lon)s into separate line segments
         if shape == "LINE" or shape[:4] == "POLY":
             # Input data is list or array: [lat0,lon0,lat1,lon1,lat2,lon2,lat3,lon3,..]
