@@ -26,8 +26,7 @@ class SharedAirspace(core.Entity):
 
     def create(self, n: int = 1) -> None:
         """
-        When new aircraft are created, they are appended with a new field that stores
-        their role in shared airspace.
+        Default role for newly created aircraft.
         """
 
         super().create(n)

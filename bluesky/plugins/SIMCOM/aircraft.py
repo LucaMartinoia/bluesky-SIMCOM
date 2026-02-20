@@ -1,7 +1,6 @@
 from bluesky import core, traf, stack, sim
-from bluesky.plugins.SIMCOM.adsbout import ADSBout
+from bluesky.plugins.SIMCOM.adsbout import ADSBout, Transmission
 from bluesky.plugins.SIMCOM.shared_airspace import SharedAirspace
-from bluesky.plugins.SIMCOM.physical_layer import Transmission
 
 
 """
@@ -32,8 +31,7 @@ class Aircraft(core.Entity):
 
     def create(self, n: int = 1) -> None:
         """
-        This function gets called automatically
-        when new aircraft are created.
+        Initialize newly created aircraft.
         """
 
         super().create(n)
@@ -82,7 +80,7 @@ class Aircraft(core.Entity):
     #                      STACK COMMANDS
     # --------------------------------------------------------------------
 
-    @stack.command(name="SURVEILLANCE", brief="SURVEILLANCE acid,[status (0, 1, 2)]")
+    @stack.command(name="SURVEILLANCE", brief="SURVEILLANCE acid,[status (0/1/2)]")
     def sstatus(self, acid: "acid", status: str = "") -> tuple[bool, str]:  # type: ignore
         """
         Set the surveillance status of a given aircraft.
@@ -97,7 +95,15 @@ class Aircraft(core.Entity):
                 f"Aircraft {traf.id[acid]} surveillance status is {self.adsbout.ss[acid]}.",
             )
 
-        # Otherwise apply passed status
-        self.adsbout.ss[acid] = int(status)
+        ss = int(status)
+        if 0 <= ss <= 2:
+            # Otherwise apply passed status
+            self.adsbout.ss[acid] = ss
 
-        return True, f"The surveillance status for {traf.id[acid]} is set to {status}."
+            return (
+                True,
+                f"The surveillance status for {traf.id[acid]} is set to {status}.",
+            )
+
+        else:
+            return False, f"The surveillance status {status} is not valid."

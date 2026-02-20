@@ -17,22 +17,21 @@ class Security(core.Entity):
     def __init__(self) -> None:
         super().__init__()
 
-        self.security_str = (
-            "AES-GCM, NONE, STATUS, TOGGLE"  # List of implemented schemes
-        )
-        self.flag = False  # Module ON/OFF flag
+        # List of implemented schemes
+        self.security_str = "AES-GCM, NONE, STATUS, TOGGLE"
+        # Module ON/OFF flag
+        self.flag = False
 
-        # Create arrays for the attack arguments and attack type
         with self.settrafarrays():
-            self.scheme = []  # Scheme type
+            # Scheme type
+            self.scheme = []
             self.model = []
             # Keys for the scheme
             self.keyring = []
 
     def create(self, n: int = 1) -> None:
         """
-        When new aircraft are created, they are appended with a new field that stores
-        the security parameters.
+        Cybersecurity parameters for newly created aircraft.
         """
 
         super().create(n)
@@ -59,9 +58,15 @@ class Security(core.Entity):
 
     def encrypt_AESGCM(self, msg: list[str], counter: int, model) -> tuple[list, int]:
         """
-        Encrypt a single ADS-B message using AES-GCM.
+        Model aircraft-side secure ADS-B transmission using AES-GCM.
 
-        Called from aircraft.
+        The original ADS-B message is split into header (AAD: DF+CA+ICAO) and
+        payload; only the payload is encrypted, while the header remains in clear.
+        A nonce is constructed from random bytes and a counter, and the GCM tag
+        is appended alongside the ciphertext. The CRC is recomputed over the
+        modified message, assuming tag and nonce are conveyed as associated
+        metadata (e.g., overlay channel). Returns the protected message and the
+        incremented counter.
         """
 
         # Skip empty message
@@ -104,9 +109,13 @@ class Security(core.Entity):
         Returns True if nonce is valid (counter > last), False otherwise.
         """
 
+        # If no cached nonce, accept it
+        if not cached_nonce:
+            return True
+
         # Extract counter from 4 last bytes of the nonce
         counter = int.from_bytes(nonce[-4:], "big")
-        cached_counter = int.from_bytes(cached_nonce[-4:], "big") if cached_nonce else 0
+        cached_counter = int.from_bytes(cached_nonce[-4:], "big")
 
         if counter <= cached_counter:
             return False  # replay or old message
@@ -117,10 +126,14 @@ class Security(core.Entity):
         self, msg: list, cached_nonce: bytes, model
     ) -> tuple[list[str], bytes]:
         """
-        Decrypts a single ADS-B hex message using AES-GCM.
-        Returns decrypted payload as bytes, or [""] if authentication fails.
+        Model receiver-side AES-GCM decryption and authentication of a protected
+        ADS-B message.
 
-        Called from receiver.
+        The header (AAD) is used for authentication while the payload is decrypted
+        using the provided nonce and key model. Nonce freshness is enforced to
+        mitigate replay; if authentication or nonce validation fails, [""] is
+        returned to represent a corrupted/unauthenticated message. On success,
+        the original ADS-B hex message is reconstructed and the nonce cache updated.
         """
 
         if len(msg) != 3:
@@ -213,7 +226,7 @@ class Security(core.Entity):
 
                 return True, f"{traf.id[i]} is not using any security schemes."
         else:
-            # For all.
+            # For all
             n = traf.ntraf
 
             self.scheme = ["NONE"] * n

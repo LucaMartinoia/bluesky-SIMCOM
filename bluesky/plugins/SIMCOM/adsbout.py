@@ -7,11 +7,18 @@ from bluesky.plugins.SIMCOM.tools import hex2bin, bin2hex, int2bin
 
 
 """
-Module for ADS-B Out implementation.
+Module that implement ADS-B Out functionalities.
 """
 
 
 TYPE_CODES = dict(identification=4, position=9, velocity=19)
+
+
+@dataclass
+class Transmission:
+    msg: list
+    source_loc: tuple[float, float] | None
+    time: float = 0.0  # Time of emission
 
 
 @dataclass
@@ -45,10 +52,10 @@ class ADSBout(core.TrafficArrays):
     Because of this, it cannot accept BlueSky decorators like Timers and Stack functions.
     """
 
-    freq = Frequencies()
-
     def __init__(self) -> None:
         super().__init__()
+
+        self.freq = Frequencies()
 
         # ADS-B Out registry
         with self.settrafarrays():
@@ -96,7 +103,7 @@ class ADSBout(core.TrafficArrays):
 
     def get(self, ac_idx: int, rx_idx: int = 0) -> dict:
         """
-        Get ADS-B data for a specific aircraft.
+        Get ADS-B Out data for a specific aircraft.
         """
 
         return {
@@ -119,7 +126,7 @@ class ADSBout(core.TrafficArrays):
     #                      UPDATE REGISTRY
     # --------------------------------------------------------------------
 
-    def update_registry(self, reference, index: int, rx_idx: int = 0) -> None:
+    def update_registry(self, reference: object, index: int, rx_idx: int = 0) -> None:
         """
         Dispatch to appropriate update method.
         """
@@ -131,9 +138,14 @@ class ADSBout(core.TrafficArrays):
 
     def update_from_traf(self, reference, index: int) -> None:
         """
-        Update registry from traf (plain float/string values).
+        Model the avionics step where the aircraft copies its navigation state
+        (GNSS/FMS) into the ADS-B Out register before transmission. The broadcast
+        state is derived from the simulator “true” traffic state and corrupted with
+        independent Gaussian noise to approximate GNSS position, altitude, and
+        velocity uncertainty.
         """
 
+        # Update callsign and ICAO
         self.callsign[index] = reference.id[index]
         self.icao[index] = self.icao[index] or f"{np.random.randint(0, 0xFFFFFF+1):06X}"
 
@@ -154,6 +166,7 @@ class ADSBout(core.TrafficArrays):
         dv_n = np.random.normal(0.0, sigma_v)
         dv_e = np.random.normal(0.0, sigma_v)
 
+        # Update status variables
         self.alt[index] = reference.alt[index]
         self.altGNSS[index] = np.maximum(reference.alt[index] + noise_alt, 0)
         self.lat[index] = reference.lat[index] + dlat
@@ -184,32 +197,13 @@ class ADSBout(core.TrafficArrays):
         self.vs[index] = reference.vs[index][0]
         self.trk[index] = reference.trk[index][0]
 
-    def empty_registry(self, index: int) -> None:
-        """
-        Empty the registry for a given index.
-        """
-
-        # Update ADS-B registry
-        self.alt[index] = np.nan
-        self.altGNSS[index] = np.nan
-        self.lat[index] = np.nan
-        self.lon[index] = np.nan
-        self.gsnorth[index] = np.nan
-        self.gseast[index] = np.nan
-        self.gs[index] = np.nan
-        self.vs[index] = np.nan
-        self.trk[index] = np.nan
-
-        self.icao[index] = ""
-        self.callsign[index] = ""
-
     # --------------------------------------------------------------------
     #                      ENCODE MESSAGES
     # --------------------------------------------------------------------
 
     def encode_msg(self, index: int, msg_type: str, crc: bool = True) -> list:
         """
-        Encode all ADS-B messages for a given aircraft.
+        Encode a specific message type for a given aircraft.
 
         If crc is False the messages are encoded without CRC.
         """

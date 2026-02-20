@@ -4,9 +4,8 @@ from bluesky import core, stack, traf, ref, sim, settings, tools
 from bluesky.tools.aero import Rearth, nm
 from bluesky.tools.misc import txt2alt
 from bluesky.plugins.SIMCOM.tools import id2idx
-from bluesky.plugins.SIMCOM.adsbout import ADSBout
+from bluesky.plugins.SIMCOM.adsbout import ADSBout, Transmission
 from bluesky.plugins.SIMCOM.adsbin import ADSBin
-from bluesky.plugins.SIMCOM.physical_layer import Transmission
 
 """
 Module that implements cyber-attacks on the ADS-B protocol.
@@ -18,7 +17,7 @@ class Attacker(core.Entity):
     Class that implements Cyber-attackers for ADS-B traffic.
     """
 
-    def __init__(self, loc) -> None:
+    def __init__(self) -> None:
         super().__init__()
 
         # List of implemented commands
@@ -28,16 +27,13 @@ class Attacker(core.Entity):
         # Module ON/OFF flag
         self.flag = False
         # Spatial references
-        self.loc = loc
-        self.cloc = (
-            (self.loc.attackers[0].clat, self.loc.attackers[0].clon)
-            if len(self.loc.attackers) > 0
-            else None
-        )
+        self.area = []
+        self.loc = None
+        self.n = 1
 
         # Create arrays for the attack arguments and cached values
         with self.settrafarrays():
-            # Attack type
+            # Attack type and parameters
             self.type = np.array([], dtype="<U20")
             self.params = []
             self.updateflag = np.array([], dtype=bool)
@@ -49,8 +45,7 @@ class Attacker(core.Entity):
 
     def create(self, n: int = 1) -> None:
         """
-        When new aircraft are created, they are appended with new fields that store
-        the cyber-attack parameters.
+        Initialize attacker parameters for newly created aircraft.
         """
 
         super().create(n)
@@ -73,27 +68,6 @@ class Attacker(core.Entity):
     #                      ATTACKS
     # --------------------------------------------------------------------
 
-    def intercept(
-        self, msg: list, msg_type: str, t: float, index: int
-    ) -> Transmission | None:
-        """
-        Overwrites the ADS-B messages depending on the attack.
-        """
-
-        type = self.type[index]
-
-        # Call respective attack
-        if type == "FREEZE":
-            return self.freeze(msg, msg_type, t, index)
-        elif type == "HIDE":
-            return self.hide(t)
-        elif type == "JUMP":
-            return self.jump(msg_type, t, index)
-        else:
-            # Fallback case: Do nothing
-            print(f"Attack {type} not implemented.")
-            return None
-
     def eavesdrop(self, msg: list, msg_type: str, i: int) -> None:
         """
         Simulate passive attacks to update attacker's ADS-B In cache.
@@ -110,9 +84,41 @@ class Attacker(core.Entity):
             self.adsbout.icao[i] = self.adsbin.icao[i]
             self.adsbout.callsign[i] = self.adsbin.callsign[i]
 
+    def intercept(
+        self, msg: list, msg_type: str, t: float, index: int
+    ) -> Transmission | None:
+        """
+        Apply the attack logic for a given attacker on an outgoing ADS-B message.
+
+        Depending on the attacker type at `index`, the function may modify, drop,
+        or replace the original message. If no attack is applied, or if the message
+        is missing or of the wrong type, returns None to indicate that no new
+        transmission occurs.
+        """
+
+        type = self.type[index]
+
+        # Call respective attack
+        if type == "FREEZE":
+            return self.freeze(msg, msg_type, t, index)
+        elif type == "HIDE":
+            return self.hide(t)
+        elif type == "JUMP":
+            return self.jump(msg_type, t, index)
+        else:
+            # Fallback case: Do nothing
+            print(f"Attack {type} not implemented.")
+            return None
+
     def freeze(self, msg: list, msg_type: str, t: float, index: int) -> Transmission:
         """
-        Simulate replay attacks by freezing ADS-B outputs to last known values.
+        Model a replay (freeze) attack by re-transmitting the last observed ADS-B
+        message of a given type without updating its content.
+
+        The attacker caches the first valid message and subsequently replays it,
+        including all associated metadata (e.g., tag, nonce, or auxiliary fields),
+        assuming these are observable and reusable (e.g., via phase overlay). A
+        fixed processing is added before emitting the forged Transmission.
         """
 
         # Ensure the attribute exists
@@ -129,13 +135,17 @@ class Attacker(core.Entity):
         # Processing time, df + ca + icao
         t += 32e-6
 
-        print("Frozen msg", cached, msg_type)
-
-        return Transmission(msg=cached, source_loc=self.cloc, time=t)
+        return Transmission(msg=cached, source_loc=self.loc, time=t)
 
     def hide(self, t: float) -> Transmission:
         """
-        Simulate selective jamming by deleting ADS-B messages.
+        Model selective jamming by replacing a valid ADS-B message with an
+        unintelligible payload.
+
+        The returned message is set to [""] to represent that a transmission
+        occurred but was corrupted (e.g., jammed). This differs from returning
+        None, which indicates that no transmission took place at all. A fixed
+        processing delay is added before emission.
         """
 
         # Delete message
@@ -143,7 +153,7 @@ class Attacker(core.Entity):
         # Processing time, df + ca + icao
         t += 32e-6
 
-        return Transmission(msg=msg, source_loc=self.cloc, time=t)
+        return Transmission(msg=msg, source_loc=self.loc, time=t)
 
     def jump(self, msg_type: str, t: float, index: int) -> Transmission | None:
         """
@@ -163,15 +173,12 @@ class Attacker(core.Entity):
             self.adsbout.altGNSS[index] = self.adsbout.alt[index]
 
             # Recompute only the required frame
-            if msg_type == "even":
-                msg = self.adsbout.airborne_position(index, even=True)
-            else:
-                msg = self.adsbout.airborne_position(index, even=False)
+            msg = self.adsbout.encode_msg(index, msg_type)
 
             # Processing delay (half message processing)
             t += 60e-6
 
-            return Transmission(msg=msg, source_loc=self.cloc, time=t)
+            return Transmission(msg=msg, source_loc=self.loc, time=t)
 
     def emit_msg(self, index: int, msg_type: str) -> Transmission:
         """
@@ -187,7 +194,7 @@ class Attacker(core.Entity):
         # Transmit ADS-B message
         return Transmission(
             msg=msg,
-            source_loc=self.cloc,
+            source_loc=self.loc,
             time=0.0,
         )
 
@@ -260,6 +267,9 @@ class Attacker(core.Entity):
         """
         Update the ADS-B Out registry for dynamical attacks.
         """
+
+        if not self.flag:
+            return
 
         # Find airctraft that need updating
         mask = self.updateflag
@@ -415,7 +425,7 @@ class Attacker(core.Entity):
     @stack.command(name="DELGHOST", brief="DELGHOST [acid]")
     def remove_ghost(self, acid: str = "") -> tuple[bool, str]:  # type: ignore
         """
-        Remove selected aircraft. If no ACID is provided, remove ALL ghost aircraft instead.
+        Remove selected GHOST. If no ACID is provided, remove all GHOST aircraft instead.
         """
 
         if not self.flag:

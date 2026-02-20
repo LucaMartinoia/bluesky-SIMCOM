@@ -7,7 +7,7 @@ from bluesky.plugins.SIMCOM.tools import hex2bin, bin2int
 
 
 """
-Module for ADS-B In implementation.
+Module that implement ADS-B In functionalities.
 """
 
 
@@ -45,7 +45,7 @@ class ADSBin(core.TrafficArrays):
         # Timeout timer
         self.staletimeout = StaleTimeout()
 
-        # Create ADS-B In cache
+        # Initialize ADS-B In cache
         with self.settrafarrays():
             self.icao = []
             self.callsign = []
@@ -99,7 +99,7 @@ class ADSBin(core.TrafficArrays):
 
     def get(self, ac_idx: int, rx_idx: int = 0) -> dict:
         """
-        Get ADS-B data for a specific aircraft.
+        Get cached data for a specific aircraft.
         """
 
         return {
@@ -118,9 +118,13 @@ class ADSBin(core.TrafficArrays):
             "ss": self.ss[ac_idx][rx_idx],
         }
 
+    # --------------------------------------------------------------------
+    #                      DECODE PLAINTEXT
+    # --------------------------------------------------------------------
+
     def decode_plaintext(self, msg: str, msg_type: str, i_rx: int, i_ac: int) -> None:
         """
-        Decode the plaintext ADS-B messages and save the data to the cache.
+        Decode a plaintext ADS-B message and update the receiver cache.
         """
 
         if msg_type in ("even", "odd") and msg:
@@ -340,7 +344,6 @@ class ADSBin(core.TrafficArrays):
     def update_id(self, msg_id: str, i_rx: int, i_ac: int) -> bool:
         """
         Update identification cache only if decoding succeeds.
-        Keeps last good values otherwise.
         """
 
         # Decode callsign
@@ -397,7 +400,7 @@ class ADSBin(core.TrafficArrays):
 
     def decode_velocity(self, msg: str) -> tuple[float, float, float, str]:
         """
-        Decode speed, track, vertical speed.
+        Decode speed, track, vertical speed from velocity message.
         """
 
         # Try decoding
@@ -410,7 +413,7 @@ class ADSBin(core.TrafficArrays):
 
     def decode_callsign(self, msg: str) -> tuple[str, str]:
         """
-        Decode callsign.
+        Decode callsign from identification message.
         """
 
         # Try decoding

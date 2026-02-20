@@ -1,4 +1,133 @@
+import numpy as np
+from matplotlib.path import Path
 from bluesky import traf
+from bluesky.network.publisher import StatePublisher
+from bluesky.tools import areafilter
+
+
+# --------------------------------------------------------------------
+# --------------------------------------------------------------------
+#                           SHAPES
+# --------------------------------------------------------------------
+# --------------------------------------------------------------------
+
+# Dictionary of all basic shapes
+basic_shapes = dict()
+# Publisher object to manage publishing of states to clients
+polypub = StatePublisher("ADSBPOLY", collect=True)
+
+
+@polypub.payload
+def puball():
+    return dict(polys={name: poly.raw for name, poly in basic_shapes.items()})
+
+
+def defineArea(name, shape, coordinates, top=1e9, bottom=-1e9):
+    """
+    Define a new area.
+    """
+
+    if name == "LIST":
+        if not basic_shapes:
+            return True, "No shapes are currently defined."
+        else:
+            return True, "Currently defined shapes:\n" + ", ".join(basic_shapes)
+    if coordinates is None:
+        if name in basic_shapes:
+            return True, str(basic_shapes[name])
+        else:
+            return False, f"Unknown shape: {name}"
+    elif shape == "CIRCLE":
+        basic_shapes[name] = Circle(name, coordinates, top, bottom)
+    elif shape[:4] == "POLY":
+        basic_shapes[name] = Poly(name, coordinates, top, bottom)
+
+    clat = basic_shapes[name].clat
+    clon = basic_shapes[name].clon
+    # Pass the shape on to the connected clients
+    polypub.send_update(
+        polys={name: dict(shape=shape, coordinates=coordinates, clat=clat, clon=clon)}
+    )
+
+    return True
+
+
+def colour(name, r, g, b):
+    """
+    Set custom color for visual objects.
+    """
+
+    poly = basic_shapes.get(name)
+    if poly:
+        poly.color = (r, g, b)
+        polypub.send_update(polys={name: dict(color=poly.color)})
+        return True
+    return False, "No shape found with name " + name
+
+
+class Poly(areafilter.Poly):
+    """
+    A polygon shape with center.
+    """
+
+    def __init__(self, name, coordinates, top=1e9, bottom=-1e9):
+        super().__init__(name, coordinates, top, bottom)
+        self.border = Path(np.reshape(coordinates, (len(coordinates) // 2, 2)))
+
+        self.clat, self.clon = self.center()
+
+    def center(self) -> tuple[float, float]:
+        """
+        Return the geographic center of a shape.
+        """
+
+        clat = 0.5 * (self.bbox[0] + self.bbox[2])
+        clon = 0.5 * (self.bbox[1] + self.bbox[3])
+        return (clat, clon)
+
+    @property
+    def loc(self):
+        return (self.clat, self.clon)
+
+    @property
+    def raw(self):
+        ret = dict(
+            name=self.name,
+            shape=self.kind(),
+            coordinates=self.coordinates,
+            clat=self.clat,
+            clon=self.clon,
+        )
+        if hasattr(self, "color"):
+            ret["color"] = self.color
+        return ret
+
+
+class Circle(areafilter.Circle):
+    """
+    A Circle shape.
+    """
+
+    def __init__(self, name, coordinates, top=1e9, bottom=-1e9):
+        super().__init__(name, coordinates, top, bottom)
+
+    @property
+    def raw(self):
+        ret = dict(
+            name=self.name,
+            shape=self.kind(),
+            coordinates=self.coordinates,
+            clat=self.clat,
+            clon=self.clon,
+        )
+        if hasattr(self, "color"):
+            ret["color"] = self.color
+        return ret
+
+    @property
+    def loc(self):
+        return (self.clat, self.clon)
+
 
 # --------------------------------------------------------------------
 # --------------------------------------------------------------------

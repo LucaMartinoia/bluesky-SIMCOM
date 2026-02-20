@@ -79,7 +79,7 @@ class ConflictDetection(core.Entity, replaceable=True):
 
     def create(self, n: int) -> None:
         """
-        Default values for new aircraft.
+        Default values for newly created aircraft.
         """
 
         super().create(n)
@@ -121,8 +121,12 @@ class ConflictDetection(core.Entity, replaceable=True):
             else:
                 return np.array([row[index] for row in attr])
 
-        ownship_reduced = SimpleNamespace(**{f: extract(ownship, f) for f in fields})
-        intruder_reduced = SimpleNamespace(**{f: extract(intruder, f) for f in fields})
+        ownship_reduced = SimpleNamespace(
+            **{f: extract(ownship.adsbin, f) for f in fields}
+        )
+        intruder_reduced = SimpleNamespace(
+            **{f: extract(intruder.adsbin, f) for f in fields}
+        )
 
         return ownship_reduced, intruder_reduced
 
@@ -132,7 +136,7 @@ class ConflictDetection(core.Entity, replaceable=True):
         """
 
         # If there are no aircraft or detection is off, pass
-        if self.flag and len(ownship.callsign) != 0:
+        if self.flag and len(ownship.adsbin.callsign) != 0:
             # Gather receiver-specific data
             ownship, intruder = self.gather_data(ownship, intruder, i_rx)
             # Compute conflict detections

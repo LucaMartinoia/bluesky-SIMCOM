@@ -582,8 +582,6 @@ class Poly(RenderObject, layer=-10):
     @subscriber(topic="ADSBPOLY")
     def update_poly_data(self, data):
 
-        print("GUI poly data?")
-
         if ctx.action in (ActionType.Reset, ActionType.ActChange):
             # Simulation reset: Clear all entries
             self.bufdata.clear()
