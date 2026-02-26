@@ -1,6 +1,6 @@
 import numpy as np
 from types import SimpleNamespace
-from bluesky import stack, traf, settings, core
+from bluesky import stack, settings, core, traf
 from bluesky.tools import geo
 from bluesky.tools.aero import nm, ft
 

@@ -1,6 +1,6 @@
 import numpy as np
 from types import SimpleNamespace
-from bluesky import core, stack, traf, ref, sim, settings, tools
+from bluesky import core, stack, settings, tools, traf, ref, sim
 from bluesky.tools.aero import Rearth, nm
 from bluesky.tools.misc import txt2alt
 from bluesky.plugins.SIMCOM.tools import id2idx

@@ -283,7 +283,12 @@ class ADSBin(core.TrafficArrays):
         lat, lon, icao = self.decode_position(msg_pos_e, msg_pos_o, time_even, time_odd)
 
         # Update position cache
-        if not np.isnan(lat) and not np.isnan(lon):
+        if (
+            lat is not None
+            and lon is not None
+            and not np.isnan(lat)
+            and not np.isnan(lon)
+        ):
             self.lat[i_ac][i_rx] = lat
             self.lon[i_ac][i_rx] = lon
 
@@ -307,7 +312,7 @@ class ADSBin(core.TrafficArrays):
         alt, ss, icao = self.decode_altitude_ss(msg)
 
         # Update altitude cache
-        if not np.isnan(alt):  # type:ignore
+        if alt is not None and not np.isnan(alt):  # type:ignore
             self.alt[i_ac][i_rx] = alt * ft
             self.altGNSS[i_ac][i_rx] = alt * ft
             self.ss[i_ac][i_rx] = ss
@@ -327,7 +332,14 @@ class ADSBin(core.TrafficArrays):
         speed, track, vs, icao = self.decode_velocity(msg_vel)
 
         # Update velocity cache
-        if not np.isnan(speed) and not np.isnan(track) and not np.isnan(vs):
+        if (
+            speed is not None
+            and track is not None
+            and vs is not None
+            and not np.isnan(speed)
+            and not np.isnan(track)
+            and not np.isnan(vs)
+        ):
             self.gs[i_ac][i_rx] = speed * kts  # To [m/s]
             self.trk[i_ac][i_rx] = track
             rads = np.deg2rad(self.trk[i_ac][i_rx])

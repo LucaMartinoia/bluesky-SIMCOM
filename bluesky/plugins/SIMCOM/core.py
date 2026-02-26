@@ -173,4 +173,6 @@ class Traffic(core.Entity):
         Save data.
         """
 
-        self.logger.logging(self.world.attacker, self.world.receivers, self.cd)
+        self.logger.logging(
+            self.world.aircraft, self.world.attacker, self.world.receivers, self.cd
+        )

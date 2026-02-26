@@ -1,4 +1,4 @@
-from bluesky import core, traf, stack, sim
+from bluesky import core, stack, sim, traf
 from bluesky.plugins.SIMCOM.adsbout import ADSBout, Transmission
 from bluesky.plugins.SIMCOM.shared_airspace import SharedAirspace
 

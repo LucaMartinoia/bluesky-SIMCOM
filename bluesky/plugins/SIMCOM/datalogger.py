@@ -1,4 +1,5 @@
 import pandas as pd
+import numpy as np
 from datetime import datetime
 from bluesky import core, stack, traf, sim
 
@@ -43,45 +44,56 @@ class Logger(core.Entity):
             "gseast",
             "fuelflow",
             "atk_callsign",
+            "ghost_lat",
+            "ghost_lon",
             "rx_lat",
             "rx_lon",
             "rx_alt",
+            "rx_gsnorth",
+            "rx_gseast",
+            "atk_type",
+            "ac_role",
         ]
 
         # Create an empty DataFrame with the specified columns
         self.df = pd.DataFrame(columns=self.columns)
 
-    def logging(self, attacker, receivers, cd) -> None:
+    def logging(self, aircraft, attacker, receivers, cd) -> None:
         """
         Save data to Dataframe.
         """
 
-        if self.flag:
+        if not self.flag:
+            return
 
-            # Conflict detection conflicts and loss of separations
-            self.conflict_list.append(cd.confpairs_unique)
-            self.los_list.append(cd.lospairs_unique)
+        # Conflict detection conflicts and loss of separations
+        self.conflict_list.append(cd.confpairs_unique)
+        self.los_list.append(cd.lospairs_unique)
 
-            data = {
-                "t": sim.simt,
-                "id": traf.id,
-                "lat": traf.lat,
-                "lon": traf.lon,
-                "alt": traf.alt,
-                "gsnorth": traf.gsnorth,
-                "gseast": traf.gseast,
-                "fuelflow": traf.perf.fuelflow,
-                "atk_callsign": attacker.adsbin.callsign,
-                "rx_lat": receivers.adsbin.lat,
-                "rx_lon": receivers.adsbin.lon,
-                "rx_alt": receivers.adsbin.alt,
-                "cd": cd.confpairs_unique,
-                "los": cd.lospairs_unique,
-            }
-            # Convert initial data to a DataFrame
-            data_t = pd.DataFrame(data, columns=self.columns)
+        data = {
+            "t": sim.simt,
+            "id": list(traf.id),
+            "lat": traf.lat,
+            "lon": traf.lon,
+            "alt": traf.alt,
+            "gsnorth": traf.gsnorth,
+            "gseast": traf.gseast,
+            "fuelflow": traf.perf.fuelflow,
+            "atk_callsign": attacker.adsbin.callsign,
+            "ghost_lat": np.array(attacker.adsbout.lat).flatten(),
+            "ghost_lon": np.array(attacker.adsbout.lon).flatten(),
+            "rx_lat": np.array(receivers.adsbin.lat).flatten(),
+            "rx_lon": np.array(receivers.adsbin.lon).flatten(),
+            "rx_alt": np.array(receivers.adsbin.alt).flatten(),
+            "rx_gsnorth": np.asarray(receivers.adsbin.gsnorth).flatten(),
+            "rx_gseast": np.asarray(receivers.adsbin.gseast).flatten(),
+            "atk_type": np.asarray(attacker.type).flatten(),
+            "ac_role": np.asarray(aircraft.sharedair.role).flatten(),
+        }
+        # Convert initial data to a DataFrame
+        data_t = pd.DataFrame(data, columns=self.columns)
 
-            self.df = pd.concat([self.df, data_t], ignore_index=True)
+        self.df = pd.concat([self.df, data_t], ignore_index=True)
 
     # --------------------------------------------------------------------
     #                      STACK COMMANDS

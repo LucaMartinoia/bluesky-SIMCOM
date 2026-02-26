@@ -21,6 +21,8 @@ class Security(core.Entity):
         self.security_str = "AES-GCM, NONE, STATUS, TOGGLE"
         # Module ON/OFF flag
         self.flag = False
+        # Global AES-GCM flag
+        self.aesgcm = False
 
         with self.settrafarrays():
             # Scheme type
@@ -40,6 +42,12 @@ class Security(core.Entity):
         self.scheme[-n:] = ["NONE"] * n
         self.model[-n:] = [None] * n
         self.keyring[-n:] = [b""] * n
+
+        if self.aesgcm:
+            self.scheme[-n:] = ["AES-GCM"] * n
+            for i in range(-n, 0):
+                self.keyring[i] = AESGCM.generate_key(bit_length=128)  # type:ignore
+                self.model[i] = AESGCM(self.keyring[i])  # type:ignore
 
     # --------------------------------------------------------------------
     #                      SECURITY SCHEMES
@@ -199,6 +207,7 @@ class Security(core.Entity):
                 return True, f"{traf.id[i]} is using AES-GCM scheme."  # type:ignore
         else:
             self.scheme = ["AES-GCM"] * traf.ntraf
+            self.aesgcm = True
             for i in range(traf.ntraf):
                 self.keyring[i] = AESGCM.generate_key(bit_length=128)  # type:ignore
                 self.model[i] = AESGCM(self.keyring[i])  # type:ignore
@@ -232,6 +241,7 @@ class Security(core.Entity):
             self.scheme = ["NONE"] * n
             self.model = [None] * n
             self.keyring = [b""] * n
+            self.aesgcm = False
 
             return True, f"All aircfaft stopped using security schemes."
 

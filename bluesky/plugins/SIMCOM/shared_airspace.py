@@ -1,4 +1,4 @@
-from bluesky import core, stack, traf, settings
+from bluesky import core, stack, settings, traf
 
 
 """

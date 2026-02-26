@@ -1,4 +1,4 @@
-from bluesky import core, sim
+from bluesky import core, sim, traf
 from bluesky.plugins.SIMCOM.adsbin import ADSBin
 
 
