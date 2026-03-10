@@ -39,6 +39,7 @@ def init_plugin():
     addvisual("ADSBVIEW")  # Turn on the new overlay
     addvisual("POLY")
     stack.stack("TOGGLEVIEW 3")  # Turn on ADS-B + traffic view
+    stack.stack("LOADLOC")
 
     return config
 

@@ -20,7 +20,7 @@ class Security(core.Entity):
         # List of implemented schemes
         self.security_str = "AES-GCM, NONE, STATUS, TOGGLE"
         # Module ON/OFF flag
-        self.flag = False
+        self.flag = True
         # Global AES-GCM flag
         self.aesgcm = False
 

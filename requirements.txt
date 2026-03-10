@@ -1,0 +1,16 @@
+PyQt6
+PyQt6-WebEngine
+pyopengl
+numpy
+scipy
+pandas
+matplotlib
+msgpack
+zmq
+textual
+bluesky-navdata
+bluesky-guidata
+rtree
+cryptography
+pyModeS
+openap

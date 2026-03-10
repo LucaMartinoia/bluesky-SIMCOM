@@ -230,6 +230,10 @@ class ADSBout(core.TrafficArrays):
         emitter_category = 3
         callsign = self.callsign[index]
 
+        # If mandatory fields are empty, return nothing
+        if icao == "" or callsign == "":
+            return []
+
         # Encode and return list with hex string
         return [
             _identification(
@@ -254,6 +258,10 @@ class ADSBout(core.TrafficArrays):
         alt = self.alt[index]
         lat = self.lat[index]
         lon = self.lon[index]
+
+        # Abort if required fields are invalid
+        if icao == "" or np.isnan(alt) or np.isnan(lat) or np.isnan(lon):
+            return []
 
         # Encode and return list with hex string
         return [
@@ -288,6 +296,17 @@ class ADSBout(core.TrafficArrays):
         s_vert = self.vs[index]
         GNSS_alt = self.altGNSS[index]
         baro_alt = self.alt[index]
+
+        # Abort if required fields are invalid
+        if (
+            icao == ""
+            or np.isnan(gs_north)
+            or np.isnan(gs_east)
+            or np.isnan(s_vert)
+            or np.isnan(GNSS_alt)
+            or np.isnan(baro_alt)
+        ):
+            return []
 
         # Encode and return list with hex string
         return [

@@ -25,6 +25,7 @@ The system operates by using GNSS (Global Navigation Satellite System) to determ
 </p>
 
 The ADS-B system consists of two distinct subsystems:
+
 - ADS-B Out: Transmits the aircraft’s position and other data to external receivers.
 - ADS-B In: Receives and decodes messages broadcast by other aircraft and ground stations.
 
@@ -54,7 +55,29 @@ SIMCOM thus represents a critical step toward building more secure, reliable, an
 
 ## Installation
 
-For installation instructions, refer to the original [BlueSky repository](https://github.com/TUDelft-CNS-ATM/bluesky).
+For the installation we suggest using an environment manager, such as `conda` or `venv`. The example below is done following `conda`.
+
+1.  Create a new environment with python >=3.11
+
+        conda create -n env_name python=3.12
+
+2.  Activate it
+
+        conda activate env_name
+
+3.  Install SIMCOM dependencies via pip
+
+        pip install -r requirements.txt
+
+4.  Check installation status with
+
+        python check.py
+
+5.  Start SIMCOM with
+
+        python BlueSky.py
+
+For further installation instructions, refer to the original [BlueSky repository](https://github.com/TUDelft-CNS-ATM/bluesky).
 
 ## Sponsors
 

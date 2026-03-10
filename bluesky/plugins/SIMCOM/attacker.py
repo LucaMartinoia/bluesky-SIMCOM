@@ -25,7 +25,7 @@ class Attacker(core.Entity):
             "FREEZE, HIDE, JUMP, MGHOST, GHOST, CONFGHOST, NONE, STATUS, RESET, TOGGLE"
         )
         # Module ON/OFF flag
-        self.flag = False
+        self.flag = True
         # Spatial references
         self.area = []
         self.loc = None
