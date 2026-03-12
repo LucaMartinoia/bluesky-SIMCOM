@@ -22,7 +22,7 @@ class Receivers(core.Entity):
         self._n = 1
 
         self.spoofing_map = dict()
-        self.atktimeout = 20  # [s]
+        self.atktimeout = 5  # [s]
 
         # Ground-receivers ADS-B In
         with self.settrafarrays():

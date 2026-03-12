@@ -1,7 +1,7 @@
 import numpy as np
 from types import SimpleNamespace
 from bluesky import core, stack, settings, tools, traf, ref, sim
-from bluesky.tools.aero import Rearth, nm
+from bluesky.tools.aero import Rearth, nm, kts
 from bluesky.tools.misc import txt2alt
 from bluesky.plugins.SIMCOM.tools import id2idx
 from bluesky.plugins.SIMCOM.adsbout import ADSBout, Transmission
@@ -236,9 +236,9 @@ class Attacker(core.Entity):
         self.adsbout.altGNSS[index] = self.adsbout.alt[index]
         self.adsbout.lat[index] = lat
         self.adsbout.lon[index] = lon
-        self.adsbout.gs[index] = gs
-        self.adsbout.gsnorth[index] = gs * np.cos(rads)
-        self.adsbout.gseast[index] = gs * np.sin(rads)
+        self.adsbout.gs[index] = gs * kts
+        self.adsbout.gsnorth[index] = gs * np.cos(rads) * kts
+        self.adsbout.gseast[index] = gs * np.sin(rads) * kts
         self.adsbout.trk[index] = hdg
         self.adsbout.vs[index] = 0
 

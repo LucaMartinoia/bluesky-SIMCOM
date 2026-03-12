@@ -37,7 +37,7 @@ def init_plugin():
     }
     # Start the new visual object
     addvisual("ADSBVIEW")  # Turn on the new overlay
-    addvisual("POLY")
+    addvisual("ADSBPOLY")
     stack.stack("TOGGLEVIEW 3")  # Turn on ADS-B + traffic view
     stack.stack("LOADLOC")
 
@@ -499,7 +499,7 @@ class ADSBview(RenderObject, layer=101):
 POLY_SIZE = 20000  # Max total number of vertices when summing all polygon vertices
 
 
-class Poly(RenderObject, layer=-10):
+class ADSBPoly(RenderObject, layer=-10):
     """
     Poly OpenGL object.
     """

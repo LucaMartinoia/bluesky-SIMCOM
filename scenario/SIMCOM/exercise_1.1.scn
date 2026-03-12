@@ -63,11 +63,11 @@
 
 
 # Create experiment area
-# 00:00:00.50>EXP 43.9, 8.2, 44.4, 9.2
+00:00:00.50>EXP 43.9, 8.2, 44.4, 9.2
 00:00:00.50>TAXI OFF
 
 # Speedup to focus point
-00:00:00.50>FF 200
+#00:00:00.50>FF 200
 
 # Create data logger
 00:03:30.00>ADSBLOG SIMCOM_EX1
