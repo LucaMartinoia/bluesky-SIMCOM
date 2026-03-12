@@ -232,8 +232,8 @@ class Attacker(core.Entity):
 
         # Initialize ADS-B Out registry
         rads = np.deg2rad(hdg)
-        self.adsbout.alt[index] = alt
-        self.adsbout.altGNSS[index] = alt
+        self.adsbout.alt[index] = txt2alt(alt)
+        self.adsbout.altGNSS[index] = self.adsbout.alt[index]
         self.adsbout.lat[index] = lat
         self.adsbout.lon[index] = lon
         self.adsbout.gs[index] = gs
