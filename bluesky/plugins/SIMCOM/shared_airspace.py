@@ -1,4 +1,5 @@
 from bluesky import core, stack, settings, traf
+from bluesky.plugins.SIMCOM.tools import id2idx
 
 
 """
@@ -39,7 +40,7 @@ class SharedAirspace(core.Entity):
 
     @stack.command(name="MILCRE", brief="MILCRE acid,lat,lon,hdg,alt,spd")
     def military_cre(
-        self, acid: str, lat: float, lon: float, hdg: float, alt: str, spd: float
+        self, acid: str, lat: float, lon: float, hdg: float, alt: str, spd: str
     ) -> bool:
         """
         Creates a Military aircraft.
@@ -49,10 +50,7 @@ class SharedAirspace(core.Entity):
         stack.stack(f"CRE {acid}, glf6, {lat}, {lon}, {hdg}, {alt}, {spd}")
 
         # Set role to MILITARY
-        self.role[-1] = "MILITARY"
-
-        # Disable Conflict Detection
-        stack.stack(f"ADSBDTLOOK 0 {acid}")
+        # self.set_role(id2idx(acid), "MILITARY")
 
         return True
 

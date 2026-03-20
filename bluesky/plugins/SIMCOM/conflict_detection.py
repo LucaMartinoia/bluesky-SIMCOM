@@ -134,9 +134,9 @@ class ConflictDetection(core.Entity, replaceable=True):
         """
         Perform an update step of the Conflict Detection implementation.
         """
-
         # If there are no aircraft or detection is off, pass
         if self.flag and len(ownship.adsbin.callsign) != 0:
+
             # Gather receiver-specific data
             ownship, intruder = self.gather_data(ownship, intruder, i_rx)
             # Compute conflict detections

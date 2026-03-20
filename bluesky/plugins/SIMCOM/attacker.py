@@ -1,7 +1,7 @@
 import numpy as np
 from types import SimpleNamespace
 from bluesky import core, stack, settings, tools, traf, ref, sim
-from bluesky.tools.aero import Rearth, nm, kts
+from bluesky.tools.aero import Rearth, nm, kts, ft
 from bluesky.tools.misc import txt2alt
 from bluesky.plugins.SIMCOM.tools import id2idx
 from bluesky.plugins.SIMCOM.adsbout import ADSBout, Transmission
@@ -583,4 +583,4 @@ class Attacker(core.Entity):
         achdg = np.degrees(trk)
 
         # Create conflicting GHOST aircraft
-        self.attack_ghost(acid, aclat, aclon, achdg, str(acalt), acspd)
+        self.attack_ghost(acid, aclat, aclon, achdg, str(acalt / ft), acspd / kts)
