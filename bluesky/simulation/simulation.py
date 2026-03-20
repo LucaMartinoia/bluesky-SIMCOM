@@ -1,5 +1,6 @@
 """BlueSky simulation control object."""
 
+import platform
 import time
 import datetime
 import signal

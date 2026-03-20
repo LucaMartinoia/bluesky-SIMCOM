@@ -1,17 +1,23 @@
-''' BlueSky Shapes '''
+"""BlueSky Shapes"""
+
 import numpy as np
 from matplotlib.path import Path
 from bluesky.tools.geo import kwikdist
 
 from weakref import WeakValueDictionary
+
 try:
     from rtree.index import Index
 except (ImportError, OSError):
-    print('Warning: RTree could not be loaded. areafilter get_intersecting and get_knearest won\'t work')
+    print(
+        "Warning: RTree could not be loaded. areafilter get_intersecting and get_knearest won't work"
+    )
+
     class Index:
-        ''' Dummy index class for installations where rtree is missing
-            or doesn't work.
-        '''
+        """Dummy index class for installations where rtree is missing
+        or doesn't work.
+        """
+
         @staticmethod
         def intersection(*args, **kwargs):
             return []
@@ -30,9 +36,10 @@ except (ImportError, OSError):
 
 
 class Shape:
-    '''
-        Base class of BlueSky shapes
-    '''
+    """
+    Base class of BlueSky shapes
+    """
+
     # Global counter to keep track of used shape ids
     max_area_id = 0
 
@@ -45,10 +52,13 @@ class Shape:
 
     @classmethod
     def reset(cls):
-        ''' Reset shape data when simulation is reset. '''
+        """Reset shape data when simulation is reset."""
         # Weak dicts and areatree should be cleared automatically
         # Reset max area id
         cls.max_area_id = 0
+        cls.areas_by_id.clear()
+        cls.areas_by_name.clear()
+        cls.areatree = Index()  # critical
 
     def __init__(self, name, coordinates, top=1e9, bottom=-1e9):
         self.name = name
@@ -69,57 +79,69 @@ class Shape:
     def __del__(self):
         # Objects are removed automatically from the weak-value dicts,
         # but need to be manually removed from the rtree
-        Shape.areatree.delete(self.area_id, self.bbox)
+        try:
+            tree = getattr(Shape, "areatree", None)
+            if tree is not None:
+                tree.delete(self.area_id, self.bbox)
+        except Exception:
+            pass
 
     @property
     def raw(self):
         ret = dict(name=self.name, shape=self.kind(), coordinates=self.coordinates)
-        if hasattr(self, 'color'):
-            ret['color'] = self.color
+        if hasattr(self, "color"):
+            ret["color"] = self.color
         return ret
 
     def checkInside(self, lat, lon, alt):
-        ''' Returns True (or boolean array) if coordinate lat, lon, alt lies
-            within this shape.
+        """Returns True (or boolean array) if coordinate lat, lon, alt lies
+        within this shape.
 
-            Reimplement this function in the derived shape classes for this to
-            work.
-        '''
+        Reimplement this function in the derived shape classes for this to
+        work.
+        """
         return False
 
     def _str_vrange(self):
         if self.top < 9e8:
             if self.bottom > -9e8:
-                return f' with altitude between {self.bottom} and {self.top}'
+                return f" with altitude between {self.bottom} and {self.top}"
             else:
-                return f' with altitude below {self.top}'
+                return f" with altitude below {self.top}"
         if self.bottom > -9e8:
-            return f' with altitude above {self.bottom}'
-        return ''
+            return f" with altitude above {self.bottom}"
+        return ""
 
     def __str__(self):
-        return f'{self.name} is a {self.raw["shape"]} with coordinates ' + \
-            ', '.join(str(c) for c in self.coordinates) + self._str_vrange()
+        return (
+            f'{self.name} is a {self.raw["shape"]} with coordinates '
+            + ", ".join(str(c) for c in self.coordinates)
+            + self._str_vrange()
+        )
 
     @classmethod
     def kind(cls):
-        ''' Return a string describing what kind of shape this is. '''
+        """Return a string describing what kind of shape this is."""
         return cls.__name__.upper()
 
 
 class Line(Shape):
-    ''' A line shape '''
+    """A line shape"""
+
     def __init__(self, name, coordinates):
         super().__init__(name, coordinates)
 
     def __str__(self):
-        return f'{self.name} is a LINE with ' \
-            f'start point ({self.coordinates[0]}, {self.coordinates[1]}), ' \
-            f'and end point ({self.coordinates[2]}, {self.coordinates[3]}).'
+        return (
+            f"{self.name} is a LINE with "
+            f"start point ({self.coordinates[0]}, {self.coordinates[1]}), "
+            f"and end point ({self.coordinates[2]}, {self.coordinates[3]})."
+        )
 
 
 class Box(Shape):
-    ''' A box shape '''
+    """A box shape"""
+
     def __init__(self, name, coordinates, top=1e9, bottom=-1e9):
         super().__init__(name, coordinates, top, bottom)
         # Sort the order of the corner points
@@ -129,42 +151,51 @@ class Box(Shape):
         self.lon1 = max(coordinates[1], coordinates[3])
 
     def checkInside(self, lat, lon, alt):
-        return ((self.lat0 <=  lat) & ( lat <= self.lat1)) & \
-               ((self.lon0 <= lon) & (lon <= self.lon1)) & \
-               ((self.bottom <= alt) & (alt <= self.top))
+        return (
+            ((self.lat0 <= lat) & (lat <= self.lat1))
+            & ((self.lon0 <= lon) & (lon <= self.lon1))
+            & ((self.bottom <= alt) & (alt <= self.top))
+        )
 
 
 class Circle(Shape):
-    ''' A circle shape '''
+    """A circle shape"""
+
     def __init__(self, name, coordinates, top=1e9, bottom=-1e9):
         super().__init__(name, coordinates, top, bottom)
-        self.clat   = coordinates[0]
-        self.clon   = coordinates[1]
-        self.r      = coordinates[2]
+        self.clat = coordinates[0]
+        self.clon = coordinates[1]
+        self.r = coordinates[2]
 
     def checkInside(self, lat, lon, alt):
         distance = kwikdist(self.clat, self.clon, lat, lon)  # [NM]
-        inside   = (distance <= self.r) & (self.bottom <= alt) & (alt <= self.top)
+        inside = (distance <= self.r) & (self.bottom <= alt) & (alt <= self.top)
         return inside
 
     def __str__(self):
-        return f'{self.name} is a CIRCLE with ' \
-            f'center ({self.clat}, {self.clon}) ' \
-            f'and radius {self.r}.' + self._str_vrange()
+        return (
+            f"{self.name} is a CIRCLE with "
+            f"center ({self.clat}, {self.clon}) "
+            f"and radius {self.r}." + self._str_vrange()
+        )
 
 
 class Poly(Shape):
-    ''' A polygon shape '''
+    """A polygon shape"""
+
     def __init__(self, name, coordinates, top=1e9, bottom=-1e9):
         super().__init__(name, coordinates, top, bottom)
         self.border = Path(np.reshape(coordinates, (len(coordinates) // 2, 2)))
 
     def checkInside(self, lat, lon, alt):
-        points = np.vstack((lat,lon)).T
-        inside = np.all((self.border.contains_points(points), self.bottom <= alt, alt <= self.top), axis=0)
+        points = np.vstack((lat, lon)).T
+        inside = np.all(
+            (self.border.contains_points(points), self.bottom <= alt, alt <= self.top),
+            axis=0,
+        )
         return inside
 
 
-def get_by_name(name: str) -> Shape|None:
-    ''' Get an existing shape by name. Returns None if shape doesn't exist. '''
+def get_by_name(name: str) -> Shape | None:
+    """Get an existing shape by name. Returns None if shape doesn't exist."""
     return Shape.areas_by_name.get(name)

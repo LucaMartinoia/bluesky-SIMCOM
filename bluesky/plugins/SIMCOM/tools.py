@@ -2,7 +2,7 @@ import numpy as np
 from matplotlib.path import Path
 from bluesky import traf
 from bluesky.network.publisher import StatePublisher
-from bluesky.tools import areafilter
+from bluesky.tools import shapes
 
 
 # --------------------------------------------------------------------
@@ -65,7 +65,7 @@ def colour(name, r, g, b):
     return False, "No shape found with name " + name
 
 
-class Poly(areafilter.Poly):
+class Poly(shapes.Poly):
     """
     A polygon shape with center.
     """
@@ -103,7 +103,7 @@ class Poly(areafilter.Poly):
         return ret
 
 
-class Circle(areafilter.Circle):
+class Circle(shapes.Circle):
     """
     A Circle shape.
     """
