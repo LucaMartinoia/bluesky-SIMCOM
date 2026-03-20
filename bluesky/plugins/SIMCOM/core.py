@@ -1,9 +1,11 @@
-from bluesky import core, stack, traf, settings
+import numpy as np
+from bluesky import core, stack, settings, tools, traf
 from bluesky.network.publisher import state_publisher
 from bluesky.plugins.SIMCOM.conflict_detection import ConflictDetection
 from bluesky.plugins.SIMCOM.security import Security
 from bluesky.plugins.SIMCOM.datalogger import Logger
 from bluesky.plugins.SIMCOM.world import World
+from bluesky.plugins.SIMCOM.tools import id2idx
 
 """
 SIMCOM is a BlueSky plugin that extends the core simulator with ADS-B-specific functionality.
@@ -176,3 +178,40 @@ class Traffic(core.Entity):
         self.logger.logging(
             self.world.aircraft, self.world.attacker, self.world.receivers, self.cd
         )
+
+    @stack.command(name="ADSBPOS", brief="ADSBPOS acid")
+    def adsbpos(self, acid: str) -> tuple[bool, str]:  # type:ignore
+        """
+        Return summary of ADS-B data for a given aircraft.
+        """
+
+        i_rx = self.world.rx_view
+        i_ac = id2idx(acid)
+
+        if np.isnan(self.world.receivers.adsbin.lat[i_ac][i_rx]):
+            lines = "No real data for GHOST aircraft."
+        else:
+            latlon = tools.misc.latlon2txt(
+                self.world.receivers.adsbin.lat[i_ac][i_rx],
+                self.world.receivers.adsbin.lon[i_ac][i_rx],
+            )
+            alt = round(self.world.receivers.adsbin.alt[i_ac][i_rx] / tools.aero.ft)
+            trk = round(self.world.receivers.adsbin.trk[i_ac][i_rx])
+            gs = round(self.world.receivers.adsbin.gs[i_ac][i_rx] / tools.aero.kts)
+            VS = round(
+                self.world.receivers.adsbin.vs[i_ac][i_rx] / tools.aero.ft * 60.0
+            )
+            callsign = self.world.receivers.adsbin.callsign[i_ac][i_rx]
+
+            # Position report
+            lines = (
+                f"----------------------------------------------\n"
+                + f"ADS-B data on {acid} as seen by Receiver RX {i_rx}\n"
+                + f"Callsign: {callsign}\n"
+                + f"Pos: {latlon}\n"
+                + f"Trk: {trk:03d}       Ground speed: {gs} kts\n"
+                + f"Alt: {alt} ft        V/S: {VS} fpm\n"
+                + "---------------------------------------------\n"
+            )
+
+        return True, lines
